@@ -26,4 +26,3 @@ langchain-mcp-adapters # MCP 리소스를 툴로 변환
 # --- 유틸리티 및 저장소 ---
 pydantic               # 데이터 스키마 정의
 aiofiles               # 생성된 HTML/PPT 파일의 비동기 입출력 처리
-sqlite3                # (표준 라이브러리) LangGraph Checkpointer용 (설치 불필요)
