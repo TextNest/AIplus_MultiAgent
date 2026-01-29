@@ -1,0 +1,31 @@
+# --- 서버 및 API 프레임워크 ---
+fastapi[all]           # 비동기 웹 서버 및 데이터 검증
+uvicorn[standard]      # ASGI 서버 실행
+python-multipart       # 파일 업로드/폼 데이터 처리
+websockets             # 실시간 채팅 및 HITL 신호 전송용
+
+# --- AI 및 에이전트 오케스트레이션 ---
+langgraph              # 멀티 에이전트 상태 관리 및 HITL(중단/재개) 제어
+langchain-openai       # OpenAI LLM(GPT-4o 등) 연동
+langchain-experimental # PythonREPLTool (샌드박스) 사용을 위한 실험적 모듈
+python-dotenv          # .env 환경 변수 관리
+
+# --- 데이터 분석 및 시각화 (샌드박스 내부 필수) ---
+pandas                 # 데이터 전처리 및 분석
+numpy                  # 수치 계산
+plotly                 # 웹 사이드뷰용 동적 HTML 차트 생성
+kaleido                # Plotly 차트를 PPT용 PNG 이미지로 변환할 때 필수
+matplotlib             # 정적 시각화 보조
+seaborn                # 통계 시각화 보조
+
+# --- 보고서 작성 ---
+python-pptx            # PPT 파일 생성 및 슬라이드 편집
+
+# --- 외부 데이터 및 MCP 연동 ---
+mcp                    # Model Context Protocol 라이브러리
+langchain-mcp-adapters # MCP 리소스를 툴로 변환
+
+# --- 유틸리티 및 저장소 ---
+pydantic               # 데이터 스키마 정의
+aiofiles               # 생성된 HTML/PPT 파일의 비동기 입출력 처리
+sqlite3                # (표준 라이브러리) LangGraph Checkpointer용 (설치 불필요)
