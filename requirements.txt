@@ -13,8 +13,6 @@ python-dotenv          # .env 환경 변수 관리
 # --- 데이터 분석 및 시각화 (샌드박스 내부 필수) ---
 pandas                 # 데이터 전처리 및 분석
 numpy                  # 수치 계산
-plotly                 # 웹 사이드뷰용 동적 HTML 차트 생성
-kaleido                # Plotly 차트를 PPT용 PNG 이미지로 변환할 때 필수
 matplotlib             # 정적 시각화 보조
 seaborn                # 통계 시각화 보조
 
