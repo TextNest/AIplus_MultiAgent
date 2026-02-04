@@ -21,7 +21,7 @@ def should_continue_analysis(state: AgentState):
     if retry_count >= MAX_ANALYSIS_RETRIES:
         return "generate_report"
     
-    if feedback == "APPROVE":
+    if feedback == "APPROVE":/ㄷ
         return "generate_report"
     else:
         return "analyze_data"
