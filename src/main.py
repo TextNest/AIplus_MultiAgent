@@ -1,23 +1,39 @@
 import os
+import uuid
 from dotenv import load_dotenv
 
 # Load environment variables immediately
 load_dotenv()
 
-from src.agent.graph import create_graph
+from src.graph import create_graph
+
+# Langfuse integration (optional)
+try:
+    from langfuse import observe
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    # Fallback decorator that does nothing
+    def observe(name=None):
+        def decorator(func):
+            return func
+        return decorator
 
 if "GOOGLE_API_KEY" in os.environ:
     print(f"GOOGLE_API_KEY loaded: {os.environ['GOOGLE_API_KEY'][:5]}...")
 else:
     print("GOOGLE_API_KEY NOT FOUND in environment")
 
-
+@observe(name="Data Analysis Session")
 def main():
     print("Starting Data Analysis Agent...")
     
     # Initialize the graph
-    app = create_graph()
+    session_id = "session_" + str(uuid.uuid4())[:8]
+    print(f"🆔 Session ID: {session_id}")
     
+    app = create_graph()
+
     # Initial State
     initial_state = {
         "file_path": "src/data/sample.csv",
@@ -27,7 +43,7 @@ def main():
     
     # Run the graph
     # We use stream to see steps
-    thread = {"configurable": {"thread_id": "1"}}
+    thread = {"configurable": {"thread_id": session_id}}
     
     print(f"Processing {initial_state['file_path']}...")
     

@@ -1,6 +1,9 @@
 # Documentation (auto-generated)
 docs/
 
+# AI Agent instructions
+AGENTS.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

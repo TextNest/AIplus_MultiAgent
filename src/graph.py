@@ -1,13 +1,13 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from .state import AgentState
-from .nodes import (
+from src.agent.state import AgentState
+from src.agent.nodes import (
     load_data,
     preprocess_data,
     analyze_data,
     evaluate_results,
     generate_report,
-    human_review
+    human_review,
 )
 
 # Configuration
