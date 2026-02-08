@@ -4,9 +4,13 @@ uvicorn[standard]      # ASGI 서버 실행
 python-multipart       # 파일 업로드/폼 데이터 처리
 websockets             # 실시간 채팅 및 HITL 신호 전송용
 
+# --- 웹 UI ---
+streamlit              # 대화형 데이터 분석 웹앱
+
 # --- AI 및 에이전트 오케스트레이션 ---
 langgraph              # 멀티 에이전트 상태 관리 및 HITL(중단/재개) 제어
 langchain-openai       # OpenAI LLM(GPT-4o 등) 연동
+langchain-google-genai # Google Gemini 등 연동
 langchain-experimental # PythonREPLTool (샌드박스) 사용을 위한 실험적 모듈
 python-dotenv          # .env 환경 변수 관리
 langsmith              # 모니터링
@@ -27,3 +31,6 @@ langchain-mcp-adapters # MCP 리소스를 툴로 변환
 # --- 유틸리티 및 저장소 ---
 pydantic               # 데이터 스키마 정의
 aiofiles               # 생성된 HTML/PPT 파일의 비동기 입출력 처리
+
+# --- LLM 관찰 및 모니터링 ---
+langfuse               # LLM 트레이싱 및 관찰 플랫폼 (LangSmith 대안)
