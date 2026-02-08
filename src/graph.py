@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from src.agent.state import AgentState
+from src.agent.state import AgentState,analyzeState
 from src.agent.nodes import (
     load_data,
     preprocess_data,
@@ -21,7 +21,7 @@ def should_continue_analysis(state: AgentState):
     if retry_count >= MAX_ANALYSIS_RETRIES:
         return "generate_report"
     
-    if feedback == "APPROVE":/ㄷ
+    if feedback == "APPROVE":
         return "generate_report"
     else:
         return "analyze_data"
@@ -34,7 +34,47 @@ def should_continue_human(state: AgentState):
         return "analyze_data"
 
 def create_graph():
+    memory = MemorySaver()
+
+    analyze_workflow = StateGraph(analyzeState)
+    analyze_workflow.add_node("Plan", analyze_data.plan_analysis_code)
+    analyze_workflow.add_node("Make", analyze_data.make_analysis_code)
+    analyze_workflow.add_node("Run", analyze_data.run_code)
+    analyze_workflow.add_node("Eval", analyze_data.evaluation_code)
+    analyze_workflow.add_node("Wait", analyze_data.route_wait_node)
+    analyze_workflow.add_edge(START, "Plan")
+    analyze_workflow.add_edge("Plan", "Make")
+    analyze_workflow.add_edge("Make", "Run")
+    analyze_workflow.add_conditional_edges(
+        "Run",
+        analyze_data.router_error,
+        {
+            "Make":"Make",
+            "Eval":"Eval"
+        }
+    )
+    analyze_workflow.add_conditional_edges(
+        "Eval",
+        analyze_data.router_Eval,
+        {
+            "Wait":"Wait",
+            "Make":"Make"
+        }
+    )
+    analyze_workflow.add_conditional_edges(
+        "Wait",
+        analyze_data.router_next_step,
+        {
+            "Make":"Make",
+            "Create":"Plan",
+            END:END
+        }
+    )
+    analyze_app = analyze_workflow.compile(memory=MemorySaver(),interrupt_before=["Wait"])
+
+
     workflow = StateGraph(AgentState)
+
     
     # Add Nodes
     workflow.add_node("load_data", load_data)
@@ -75,6 +115,6 @@ def create_graph():
     )
     
     # Compile with Checkpointer for persistence
-    memory = MemorySaver()
+    
     app = workflow.compile(checkpointer=memory, interrupt_before=["human_review"])
     return app
