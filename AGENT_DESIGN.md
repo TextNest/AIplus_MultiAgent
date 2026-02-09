@@ -297,7 +297,97 @@ def should_continue_human(state: AgentState):
 
 ---
 
-## 8. 참고 파일
+## 8. 서브그래프 (Subgraph)
+
+### 8.1 개념
+
+서브그래프는 **하나의 노드 내부**에서 복잡한 워크플로우가 필요할 때 사용합니다.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  analyze_data (노드)                                     │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │  [서브그래프]                                        ││
+│  │  code_generation → code_execution → result_validation││
+│  └─────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────┘
+```
+
+### 8.2 언제 사용하나?
+
+| 상황 | 서브그래프 사용 |
+|------|----------------|
+| 노드 로직이 단순함 | ❌ 불필요 |
+| 노드 내부에 여러 단계가 있음 | ✅ 권장 |
+| 노드 내부에 조건 분기/반복이 있음 | ✅ 권장 |
+| 여러 노드를 묶고 싶음 | ❌ 잘못된 사용 (메인 그래프에서 처리) |
+
+### 8.3 주의사항
+
+⚠️ **서브그래프 ≠ 여러 노드 묶기**
+
+각 노드(`analyze_data`, `evaluate_results` 등)는 **독립적인 에이전트**입니다. 이들을 하나의 서브그래프로 묶지 마세요.
+
+```
+# ❌ 잘못된 사용
+analysis_subgraph = analyze + evaluate + finalize  # 독립 에이전트를 묶음
+
+# ✅ 올바른 사용
+analyze_data 노드 내부에서:
+  - 코드 생성 단계
+  - 코드 실행 단계
+  - 결과 검증 단계
+  → 이것을 서브그래프로 구성
+```
+
+### 8.4 템플릿 위치
+
+```
+src/agent/subgraphs/
+└── _template/              ← 팀원용 복사 템플릿
+    ├── __init__.py
+    ├── state.py            # State 정의 (Input/Internal/Output)
+    ├── graph.py            # 워크플로우 정의
+    └── nodes/
+        ├── __init__.py
+        ├── process_input.py
+        └── process_output.py
+```
+
+### 8.5 사용 방법
+
+1. `_template` 폴더를 복사하여 자신의 서브그래프 생성
+2. `state.py`에서 State 정의
+3. `nodes/`에 노드 함수 구현
+4. `graph.py`에서 워크플로우 구성
+5. 메인 노드에서 서브그래프 호출
+
+```python
+# 메인 노드에서 서브그래프 호출 예시
+from src.agent.subgraphs.my_subgraph import create_my_subgraph
+
+def analyze_data(state: AgentState) -> AgentState:
+    subgraph = create_my_subgraph()
+    
+    # 서브그래프 입력 구성
+    sub_input = {
+        "input_data": state["clean_data"],
+        # ... 기타 필드
+    }
+    
+    # 서브그래프 실행
+    sub_result = subgraph.invoke(sub_input)
+    
+    # 결과 반환
+    return {
+        "analysis_results": [sub_result["output_result"]],
+        "steps_log": sub_result["steps_log"]
+    }
+```
+
+---
+
+## 9. 참고 파일
 
 | 파일 | 설명 |
 |------|------|
@@ -305,4 +395,4 @@ def should_continue_human(state: AgentState):
 | `src/agent/state.py` | AgentState 정의 |
 | `src/agent/nodes/*.py` | 각 노드 구현 |
 | `src/core/llm_factory.py` | LLM 생성 + Langfuse 통합 |
-| `AGENTS.md` | 코딩 에이전트용 가이드라인 |
+
