@@ -1,6 +1,6 @@
 """
 Generate Report Node
-담당: [팀원 E]
+담당: 이수현
 
 역할: 분석 결과를 기반으로 보고서 생성
 입력: analysis_results, clean_data
@@ -30,7 +30,7 @@ Generate Report Node
 import pandas as pd
 from ..state import AgentState
 from ...core.llm_factory import LLMFactory, langfuse_session
-
+from ..prompt_engineering.prompts import REPORT_PROMPT
 
 def generate_report(state: AgentState) -> AgentState:
     """
@@ -38,7 +38,8 @@ def generate_report(state: AgentState) -> AgentState:
     """
     analysis_results = state.get("analysis_results", [])
     clean_data = state.get("clean_data")
-    file_path = state.get("file_path", "데이터")
+    file_path = state.get("file_path", "Data")
+    figure_list = state.get("figure_list", [])
     
     if not analysis_results:
         return {
@@ -46,15 +47,11 @@ def generate_report(state: AgentState) -> AgentState:
             "steps_log": ["[Report] ERROR: No analysis results"]
         }
     
-    try:
-        # =====================================================================
-        # 구현 예시 시작 (TODO: 팀원이 수정/확장)
-        # =====================================================================
-        
+    try:  
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             temperature=0.3,  # 보고서는 약간의 창의성 허용
         )
         
@@ -69,51 +66,23 @@ def generate_report(state: AgentState) -> AgentState:
 - 컬럼 목록: {', '.join(df.columns)}
 """
         
-        # Step 3: 프롬프트 구성
-        all_results = "\n\n---\n\n".join(analysis_results)
+        # Step 3: 시각화 자료
+        figure_markdown = ""
+        if figure_list:
+            figure_markdown = "### 분석 시각화 자료\n"
+            for fig in figure_list:
+                figure_markdown += f"![{fig}]({fig})\n"
         
-        prompt = f"""
-당신은 전문 데이터 분석가입니다. 분석 결과를 바탕으로 비즈니스 보고서를 작성하세요.
+        # Step 4: 프롬프트
+                all_results = "\n\n---\n\n".join(analysis_results)
+        
+        prompt = REPORT_PROMPT.format(
+            data_summary=data_summary,
+            all_results=all_results,
+            figure_markdown=figure_markdown
+        )
 
-## 데이터 정보
-{data_summary}
-
-## 분석 결과
-{all_results}
-
-## 보고서 작성 지침
-1. **한국어**로 작성하세요.
-2. **Markdown** 형식을 사용하세요.
-3. 기술적 내용을 비전문가도 이해할 수 있게 설명하세요.
-4. 핵심 인사이트를 강조하세요.
-5. 가능하다면 비즈니스 권고사항을 포함하세요.
-
-## 보고서 구조
-```markdown
-# 데이터 분석 보고서
-
-## 1. 요약 (Executive Summary)
-(핵심 발견사항 3줄 요약)
-
-## 2. 데이터 개요
-(분석 대상 데이터 설명)
-
-## 3. 주요 발견사항
-### 3.1 [발견사항 1]
-### 3.2 [발견사항 2]
-...
-
-## 4. 상세 분석
-(통계, 패턴, 상관관계 등)
-
-## 5. 결론 및 권고사항
-(비즈니스 관점의 제언)
-```
-
-위 구조에 맞춰 보고서를 작성하세요.
-"""
-
-        # Step 4: LLM 호출
+        # Step 5: LLM 호출
         with langfuse_session(
             session_id="generate-report",
             tags=["generate_report", "markdown"]
@@ -130,11 +99,7 @@ def generate_report(state: AgentState) -> AgentState:
             "final_report": content,
             "steps_log": ["[Report] Generated Markdown report successfully"]
         }
-        
-        # =====================================================================
-        # 구현 예시 끝
-        # =====================================================================
-        
+
     except Exception as e:
         return {
             "final_report": f"# Error\n\n보고서 생성 중 오류 발생: {str(e)}",
