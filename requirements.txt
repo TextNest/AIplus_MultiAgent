@@ -10,6 +10,7 @@ streamlit              # 대화형 데이터 분석 웹앱
 # --- AI 및 에이전트 오케스트레이션 ---
 langgraph              # 멀티 에이전트 상태 관리 및 HITL(중단/재개) 제어
 langchain-openai       # OpenAI LLM(GPT-4o 등) 연동
+langchain-anthropic    # Anthropic Claude 연동
 langchain-google-genai # Google Gemini 등 연동
 langchain-experimental # PythonREPLTool (샌드박스) 사용을 위한 실험적 모듈
 python-dotenv          # .env 환경 변수 관리
@@ -23,6 +24,8 @@ seaborn                # 통계 시각화 보조
 
 # --- 보고서 작성 ---
 python-pptx            # PPT 파일 생성 및 슬라이드 편집
+PyMuPDF                # PDF 텍스트 추출 (fitz)
+python-docx            # Word(docx) 텍스트 추출
 
 # --- 외부 데이터 및 MCP 연동 ---
 mcp                    # Model Context Protocol 라이브러리

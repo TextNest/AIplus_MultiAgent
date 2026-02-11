@@ -3,7 +3,7 @@ Generate Report Node
 담당: [팀원 E]
 
 역할: 분석 결과를 기반으로 보고서 생성
-입력: analysis_results, clean_data
+입력: analysis_results, clean_data, raw_data, file_type
 출력: final_report, steps_log
 
 =============================================================================
@@ -29,7 +29,8 @@ Generate Report Node
 """
 import pandas as pd
 from ..state import AgentState
-from ...core.llm_factory import LLMFactory, langfuse_session
+from ...core.llm_factory import LLMFactory
+from ...core.observe import langfuse_session
 
 
 def generate_report(state: AgentState) -> AgentState:
@@ -38,7 +39,10 @@ def generate_report(state: AgentState) -> AgentState:
     """
     analysis_results = state.get("analysis_results", [])
     clean_data = state.get("clean_data")
+    raw_data = state.get("raw_data")
+    file_type = state.get("file_type", "tabular")
     file_path = state.get("file_path", "데이터")
+    wf_session_id = state.get("session_id", "unknown")
     
     if not analysis_results:
         return {
@@ -47,32 +51,65 @@ def generate_report(state: AgentState) -> AgentState:
         }
     
     try:
-        # =====================================================================
-        # 구현 예시 시작 (TODO: 팀원이 수정/확장)
-        # =====================================================================
-        
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemma-3-27b-it",
             temperature=0.3,  # 보고서는 약간의 창의성 허용
         )
         
-        # Step 2: 데이터 컨텍스트 준비
-        data_summary = ""
-        if clean_data:
-            df = pd.DataFrame(clean_data)
-            data_summary = f"""
+        all_results = "\n\n---\n\n".join(analysis_results)
+
+        # Step 2: 프롬프트 구성 (파일 타입별 분기)
+        if file_type == "document":
+            data_summary = ""
+            if raw_data:
+                data_summary = f"- 문서 경로: {file_path}"
+
+            prompt = f"""
+당신은 전문 문서 분석가입니다. 분석 결과를 바탕으로 보고서를 작성하세요.
+
+## 문서 정보
+{data_summary}
+
+## 분석 결과
+{all_results}
+
+## 보고서 작성 지침
+1. **한국어**로 작성하세요.
+2. **Markdown** 형식을 사용하세요.
+3. 문서의 핵심 내용을 잘 요약하고 정리하세요.
+
+## 보고서 구조
+```markdown
+# 문서 분석 보고서
+
+## 1. 요약 (Executive Summary)
+(핵심 내용 3줄 요약)
+
+## 2. 주요 키워드 및 수치
+(분석된 키워드 및 주요 데이터)
+
+## 3. 상세 분석 내용
+(문단별 상세 요약 및 내용)
+
+## 4. 인사이트
+(비즈니스적 함의 또는 결론)
+```
+"""
+        else:
+            # 기존 Tabular 리포트 로직
+            data_summary = ""
+            if clean_data:
+                df = pd.DataFrame(clean_data)
+                data_summary = f"""
 - 데이터 출처: {file_path}
 - 총 행 수: {len(df):,}
 - 총 컬럼 수: {len(df.columns)}
 - 컬럼 목록: {', '.join(df.columns)}
 """
-        
-        # Step 3: 프롬프트 구성
-        all_results = "\n\n---\n\n".join(analysis_results)
-        
-        prompt = f"""
+            
+            prompt = f"""
 당신은 전문 데이터 분석가입니다. 분석 결과를 바탕으로 비즈니스 보고서를 작성하세요.
 
 ## 데이터 정보
@@ -115,10 +152,13 @@ def generate_report(state: AgentState) -> AgentState:
 
         # Step 4: LLM 호출
         with langfuse_session(
-            session_id="generate-report",
-            tags=["generate_report", "markdown"]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+            session_id=wf_session_id,
+            tags=["generate_report", "markdown", str(file_type)]
+        ) as lf_metadata:
+            response = llm.invoke(prompt, config={
+                "callbacks": callbacks,
+                "metadata": lf_metadata,
+            })
         
         # Step 5: 응답 처리
         content = response.content
@@ -130,10 +170,6 @@ def generate_report(state: AgentState) -> AgentState:
             "final_report": content,
             "steps_log": ["[Report] Generated Markdown report successfully"]
         }
-        
-        # =====================================================================
-        # 구현 예시 끝
-        # =====================================================================
         
     except Exception as e:
         return {

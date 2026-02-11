@@ -1,17 +1,18 @@
 # Agent Design Document
 
-> 멀티 에이전트 데이터 분석 시스템 설계 문서
+> 멀티 에이전트 기반 자동 데이터 분석 및 지능형 보고서 생성 시스템 설계 문서
 
 ---
 
 ## 1. 시스템 개요
 
 ### 1.1 목적
-CSV 데이터를 입력받아 자동으로 분석하고, 품질 평가를 거쳐 보고서를 생성하는 멀티 에이전트 시스템
+CSV, PDF, DOCX 파일을 입력받아 자동으로 분석하고, 품질 평가를 거쳐 보고서를 생성하는 멀티 에이전트 시스템
 
 ### 1.2 핵심 특징
-- **LLM 기반 분석**: LLM이 Python 코드를 생성하고 REPL에서 실행
-- **Self-Critique**: 분석 결과를 LLM이 평가하고 부족하면 재시도
+- **파일 타입 기반 라우팅**: CSV(tabular) / PDF·DOCX(document) 자동 분기
+- **LLM 기반 분석**: tabular은 Python 코드 생성+REPL 실행, document는 LLM 요약/분석
+- **Self-Critique**: 분석 결과를 LLM이 평가하고 부족하면 재시도 (최대 3회)
 - **Human-in-the-Loop**: 최종 보고서를 사람이 검토하고 피드백 제공
 
 ---
@@ -21,67 +22,64 @@ CSV 데이터를 입력받아 자동으로 분석하고, 품질 평가를 거쳐
 ### 2.1 워크플로우 다이어그램
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
-│  load_data  │────▶│ preprocess_data  │────▶│ analyze_data │
-└─────────────┘     └──────────────────┘     └──────┬───────┘
-                                                    │
-                                                    ▼
-┌─────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│    END      │◀────│   human_review   │◀────│ generate_report  │
-└─────────────┘     └────────┬─────────┘     └────────▲─────────┘
-       ▲                     │                        │
-       │                     │ REJECT                 │ APPROVE
-       │                     ▼                        │
-       │               ┌───────────┐                  │
-       │               │  (재분석)  │                  │
-       │               └─────┬─────┘                  │
-       │                     │                        │
-       │                     ▼                        │
-       │              ┌──────────────────┐            │
-       └──────────────│ evaluate_results │────────────┘
-          APPROVE     └──────────────────┘
-        (max retry)          │
-                             │ REJECT (retry < 3)
-                             ▼
-                       ┌──────────────┐
-                       │ analyze_data │
-                       └──────────────┘
+load_data → route_by_file_type
+  ├─ tabular  → preprocess_data → analyze_data ─┐
+  └─ document → analyze_document ───────────────┤
+                                                 ↓
+                              evaluate_results → conditional
+                                ├─ APPROVE → generate_report → human_review → END
+                                └─ REJECT  → (file_type 기반) analyze_data 또는 analyze_document
 ```
 
 ### 2.2 상태 흐름
 
 | 단계 | State 변화 |
 |------|-----------|
-| 1. load_data | `file_path` → `raw_data` |
-| 2. preprocess_data | `raw_data` → `clean_data` |
-| 3. analyze_data | `clean_data` → `analysis_results` |
-| 4. evaluate_results | `analysis_results` → `evaluation_feedback` |
-| 5. generate_report | `analysis_results` → `final_report` |
-| 6. human_review | `human_feedback` → END 또는 재시작 |
+| 1. load_data | `file_path` → `raw_data`, `file_type` |
+| 2a. preprocess_data | `raw_data` → `clean_data` (tabular only) |
+| 3a. analyze_data | `clean_data` → `analysis_results` (tabular) |
+| 3b. analyze_document | `raw_data` → `analysis_results` (document) |
+| 4. evaluate_results | `analysis_results` → `evaluation_feedback` (file_type 분기) |
+| 5. generate_report | `analysis_results` → `final_report` (file_type 분기) |
+| 6. human_review | `human_feedback` → END 또는 재분석 |
 
 ---
 
 ## 3. 노드 상세 설계
 
-### 3.1 load_data (데이터 로드)
+### 3.1 load_data (데이터 로드 + 파일 타입 분류)
 
 | 항목 | 내용 |
 |------|------|
-| **역할** | CSV 파일을 읽어 dictionary로 변환 |
+| **역할** | CSV/PDF/DOCX 파일을 읽어 raw_data로 변환하고 file_type 분류 |
 | **입력** | `file_path: str` |
-| **출력** | `raw_data: dict`, `steps_log` |
-| **LLM** | ❌ 불필요 |
+| **출력** | `raw_data: dict`, `file_type: Literal["tabular", "document"]`, `steps_log` |
+| **LLM** | ⚡ (이미지 기반 PDF일 때만 Gemini Vision 폴백) |
 | **구현 상태** | ✅ 완료 |
 
+**파일 타입별 처리**:
+
+| 확장자 | 처리 방식 | file_type | raw_data 형식 |
+|--------|-----------|-----------|---------------|
+| `.csv` | `pd.read_csv()` → `df.to_dict()` | `tabular` | `{"col1": {"0": val, ...}, ...}` |
+| `.pdf` | PyMuPDF 텍스트 추출 (이미지 PDF → Gemini Vision 폴백) | `document` | `{"content": str, "source": str}` |
+| `.docx` | python-docx 텍스트 추출 | `document` | `{"content": str, "source": str}` |
+
+**PDF 이미지 감지 기준**: 페이지당 평균 50자 미만이면 이미지 기반으로 판단하여 Gemini Vision 호출.
+
 ```python
-# 핵심 로직
+# 핵심 로직 (CSV)
 df = pd.read_csv(file_path)
-return {"raw_data": df.to_dict(), "steps_log": [...]}
+return {"file_type": "tabular", "raw_data": df.to_dict(), "steps_log": [...]}
+
+# 핵심 로직 (PDF/DOCX)
+text = extract_pdf_text(file_path)  # 또는 extract_word_text()
+return {"file_type": "document", "raw_data": {"content": text, "source": file_path}, "steps_log": [...]}
 ```
 
 ---
 
-### 3.2 preprocess_data (전처리)
+### 3.2 preprocess_data (전처리 — tabular only)
 
 | 항목 | 내용 |
 |------|------|
@@ -91,6 +89,8 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 | **LLM** | ❌ 불필요 (룰 기반) |
 | **구현 상태** | 🟡 스켈레톤 |
 
+> document 타입은 이 노드를 거치지 않음 (route_by_file_type에서 분기)
+
 **TODO (팀원 B)**:
 - [ ] 결측치 처리 전략 (dropna / fillna)
 - [ ] 숫자형 컬럼 자동 감지 및 변환
@@ -98,7 +98,7 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 
 ---
 
-### 3.3 analyze_data (LLM 분석)
+### 3.3 analyze_data (LLM 분석 — tabular only)
 
 | 항목 | 내용 |
 |------|------|
@@ -126,23 +126,45 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 
 ---
 
-### 3.4 evaluate_results (품질 평가)
+### 3.4 analyze_document (LLM 문서 분석 — document only)
+
+| 항목 | 내용 |
+|------|------|
+| **역할** | 문서 텍스트를 LLM으로 분석하여 요약/키워드/수치/인사이트 추출 |
+| **입력** | `raw_data: dict` (content, source), `evaluation_feedback: Optional[str]` |
+| **출력** | `analysis_results: List[str]`, `retry_count`, `steps_log` |
+| **LLM** | ✅ 필수 (Gemini 2.0 Flash, temperature=0) |
+| **구현 상태** | ✅ 완료 |
+
+**분석 항목**:
+1. **한 문단 요약** (3~5문장)
+2. **주요 키워드** (5~10개)
+3. **주요 수치/날짜/고유명사**
+4. **인사이트** (비즈니스적 함의/특이사항)
+
+**제한**: 입력 텍스트를 100,000자로 truncate
+**피드백 반영**: `evaluation_feedback`에 REJECT가 있으면 프롬프트에 개선 피드백 포함
+
+---
+
+### 3.5 evaluate_results (품질 평가 — file_type 분기)
 
 | 항목 | 내용 |
 |------|------|
 | **역할** | 분석 결과를 평가하고 APPROVE/REJECT 결정 |
-| **입력** | `analysis_results: List[str]`, `clean_data: dict` |
+| **입력** | `analysis_results: List[str]`, `clean_data: dict`, `raw_data: dict`, `file_type` |
 | **출력** | `evaluation_feedback: str`, `steps_log` |
 | **LLM** | ✅ 필수 (Critic 역할) |
-| **구현 상태** | 🟢 예시 구현됨 |
+| **구현 상태** | ✅ 완료 (tabular/document 분기) |
 
-**평가 기준**:
-| 기준 | 설명 | 점수 |
-|------|------|------|
-| 완전성 | 주요 통계가 모두 포함되었는가? | 1-5 |
-| 정확성 | 코드 에러 없이 실행되었는가? | 1-5 |
-| 유용성 | 의미있는 인사이트가 있는가? | 1-5 |
-| 명확성 | 이해하기 쉽게 정리되었는가? | 1-5 |
+**파일 타입별 평가 기준**:
+
+| 기준 | tabular | document |
+|------|---------|----------|
+| 완전성 | 주요 통계가 모두 포함되었는가? | 요약이 문서 핵심을 포함하는가? |
+| 정확성 | 코드 에러 없이 실행되었는가? | 키워드가 적절한가? |
+| 유용성 | 의미있는 인사이트가 있는가? | 수치/고유명사가 포함되었는가? |
+| 명확성 | 이해하기 쉽게 정리되었는가? | 인사이트가 유의미한가? |
 
 **결정 로직**:
 - 평균 3점 이상 → `"APPROVE"`
@@ -150,26 +172,25 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 
 ---
 
-### 3.5 generate_report (보고서 생성)
+### 3.6 generate_report (보고서 생성 — file_type 분기)
 
 | 항목 | 내용 |
 |------|------|
 | **역할** | 분석 결과를 Markdown 보고서로 변환 |
-| **입력** | `analysis_results: List[str]`, `clean_data: dict` |
+| **입력** | `analysis_results: List[str]`, `clean_data: dict`, `raw_data: dict`, `file_type` |
 | **출력** | `final_report: str`, `steps_log` |
-| **LLM** | ✅ 필수 (문서 작성) |
-| **구현 상태** | 🟢 예시 구현됨 |
+| **LLM** | ✅ 필수 (Gemini 2.0 Flash, temperature=0.3) |
+| **구현 상태** | ✅ 완료 (tabular/document 분기) |
 
-**보고서 구조**:
-```markdown
-# 데이터 분석 보고서
+**파일 타입별 보고서 구조**:
 
-## 1. 요약 (Executive Summary)
-## 2. 데이터 개요
-## 3. 주요 발견사항
-## 4. 상세 분석
-## 5. 결론 및 권고사항
-```
+| tabular | document |
+|---------|----------|
+| 1. 요약 (Executive Summary) | 1. 요약 |
+| 2. 데이터 개요 | 2. 문서 정보 |
+| 3. 주요 발견사항 | 3. 분석 결과 |
+| 4. 상세 분석 | 4. 요약/인사이트 |
+| 5. 결론 및 권고사항 | 5. 결론 |
 
 **확장 가능**:
 - HTML 보고서
@@ -178,7 +199,7 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 
 ---
 
-### 3.6 human_review (HITL)
+### 3.7 human_review (HITL)
 
 | 항목 | 내용 |
 |------|------|
@@ -192,7 +213,7 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 - `interrupt_before=["human_review"]`로 그래프 일시정지
 - 사용자가 `human_feedback` 주입
 - "APPROVE" → END
-- 그 외 → `analyze_data`로 재시작
+- 그 외 → file_type에 따라 `analyze_data` 또는 `analyze_document`로 재시작
 
 ---
 
@@ -200,11 +221,15 @@ return {"raw_data": df.to_dict(), "steps_log": [...]}
 
 ```python
 class AgentState(TypedDict):
+    # 워크플로우 세션 ID (모든 노드가 공유 — Langfuse 세션 추적용)
+    session_id: Optional[str]
+    
     # 입력
     file_path: str
+    file_type: Optional[Literal["tabular", "document"]]  # 라우팅 키
     raw_data: Optional[dict]
     
-    # 처리된 데이터
+    # 처리된 데이터 (tabular only)
     clean_data: Optional[dict]
     
     # 분석 결과 (List: 자동 병합)
@@ -226,7 +251,14 @@ class AgentState(TypedDict):
     retry_count: int
 ```
 
-### 4.1 List 자동 병합
+### 4.1 파일 타입별 raw_data 스키마
+
+| file_type | raw_data 형식 | 예시 |
+|-----------|---------------|------|
+| `tabular` | `df.to_dict()` | `{"col1": {"0": "val", ...}, ...}` |
+| `document` | `{"content": str, "source": str}` | `{"content": "추출된 텍스트...", "source": "report.pdf"}` |
+
+### 4.2 List 자동 병합
 
 `Annotated[List[str], merge_logs]` 사용 시:
 ```python
@@ -244,7 +276,17 @@ class AgentState(TypedDict):
 
 ## 5. 라우팅 로직
 
-### 5.1 evaluate_results → ?
+### 5.1 route_by_file_type (load_data 이후)
+
+```python
+def route_by_file_type(state: AgentState):
+    file_type = state.get("file_type", "tabular")
+    if file_type == "document":
+        return "analyze_document"
+    return "preprocess_data"
+```
+
+### 5.2 should_continue_analysis (evaluate_results 이후)
 
 ```python
 def should_continue_analysis(state: AgentState):
@@ -258,10 +300,14 @@ def should_continue_analysis(state: AgentState):
     if feedback == "APPROVE":
         return "generate_report"
     else:
-        return "analyze_data"  # 재시도
+        # REJECT → 파일 타입에 맞는 분석 노드로
+        file_type = state.get("file_type", "tabular")
+        if file_type == "document":
+            return "analyze_document"
+        return "analyze_data"
 ```
 
-### 5.2 human_review → ?
+### 5.3 should_continue_human (human_review 이후)
 
 ```python
 def should_continue_human(state: AgentState):
@@ -270,7 +316,11 @@ def should_continue_human(state: AgentState):
     if feedback and "APPROVE" in feedback.upper():
         return END
     else:
-        return "analyze_data"  # 처음부터 재분석
+        # 반려 → 파일 타입에 맞는 분석 노드로
+        file_type = state.get("file_type", "tabular")
+        if file_type == "document":
+            return "analyze_document"
+        return "analyze_data"
 ```
 
 ---
@@ -285,24 +335,306 @@ def should_continue_human(state: AgentState):
 
 ---
 
-## 7. 구현 우선순위
+## 7. Langfuse 세션 통합 (Observability)
 
-| 순위 | 노드 | 이유 |
-|------|------|------|
-| 1 | `analyze_data` | 핵심 분석 기능 |
-| 2 | `evaluate_results` | 품질 보장 루프 |
-| 3 | `generate_report` | 사용자 가치 전달 |
-| 4 | `preprocess_data` | 데이터 품질 개선 |
-| 5 | `human_review` | 저장/알림 확장 |
+### 7.1 아키텍처
+
+그래프 실행 시 모든 노드의 LLM 호출이 **하나의 Langfuse session**으로 묶입니다.
+
+```
+main.py / webapp/app.py
+  │
+  │  session_id = "session_abc12345"
+  │  initial_state = { "session_id": session_id, ... }
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LangGraph Workflow (session_id가 state를 통해 전파)         │
+│                                                             │
+│  load_data ──→ analyze_data ──→ evaluate_results ──→ ...    │
+│  (session_id)   (session_id)     (session_id)               │
+│       │              │                │                      │
+│       ▼              ▼                ▼                      │
+│  langfuse_session(session_id=state["session_id"])            │
+│       │              │                │                      │
+│       ▼              ▼                ▼                      │
+│  ┌─────────────────────────────────────────┐                │
+│  │  Langfuse Dashboard                     │                │
+│  │  Session: "session_abc12345"             │                │
+│  │  ├─ Trace: load_data (vision_fallback)  │                │
+│  │  ├─ Trace: analyze_data (attempt_1)     │                │
+│  │  ├─ Trace: evaluate_results (attempt_1) │                │
+│  │  ├─ Trace: analyze_data (attempt_2)     │                │
+│  │  ├─ Trace: evaluate_results (attempt_2) │                │
+│  │  └─ Trace: generate_report              │                │
+│  └─────────────────────────────────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 session_id 흐름
+
+| 위치 | 역할 |
+|------|------|
+| `main.py` / `webapp/app.py` | `session_id` 생성 → `initial_state`에 주입 |
+| `AgentState.session_id` | 모든 노드에서 공유되는 세션 식별자 |
+| 각 노드 | `state.get("session_id")` → `langfuse_session(session_id=...)` |
+| `langfuse_session()` | metadata에 `langfuse_session_id` 키로 전달 |
+| `SessionAwareCallbackHandler` | metadata에서 session_id를 읽어 trace에 적용 |
+
+**진입점별 session_id 설정**:
+
+```python
+# main.py (CLI)
+session_id = "session_" + str(uuid.uuid4())[:8]
+initial_state = {
+    "file_path": "data.csv",
+    "session_id": session_id,
+    ...
+}
+
+# webapp/app.py (Streamlit) — thread_id를 session_id로 재사용
+initial_state = {
+    "file_path": file_path,
+    "session_id": thread_id,
+    ...
+}
+```
+
+### 7.3 노드에서의 사용 패턴
+
+모든 LLM 호출 노드는 동일한 패턴을 따릅니다:
+
+```python
+def my_node(state: AgentState) -> AgentState:
+    wf_session_id = state.get("session_id", "unknown")
+    llm, callbacks = LLMFactory.create(provider="google", model="gemma-3-27b-it")
+
+    with langfuse_session(
+        session_id=wf_session_id,                    # ← state에서 가져온 통합 ID
+        tags=["my_node", f"attempt_{retry_count}"]   # ← 노드/시도를 tags로 구분
+    ) as lf_metadata:
+        response = llm.invoke(prompt, config={
+            "callbacks": callbacks,
+            "metadata": lf_metadata,
+        })
+```
+
+### 7.4 SessionAwareCallbackHandler
+
+**문제**: Langfuse의 기본 `CallbackHandler`는 `on_chain_start`에서만 `session_id`를 trace에 적용합니다. `ChatOpenAI`/`ChatAnthropic`의 `llm.invoke()`는 `on_chain_start`를 거치지 않아 session이 누락됩니다.
+
+**해결**: `src/core/observe.py`에 `SessionAwareCallbackHandler`를 구현하여, `on_chat_model_start`와 `on_llm_start`에서도 root trace일 때 `update_trace(session_id=...)`를 호출합니다.
+
+```
+기본 CallbackHandler 흐름:
+  ChatGoogleGenerativeAI.invoke()
+    → on_chain_start ← session_id 적용됨 ✅
+      → on_chat_model_start
+
+  ChatOpenAI.invoke() / ChatAnthropic.invoke()
+    → on_chat_model_start ← session_id 적용 안 됨 ❌
+
+SessionAwareCallbackHandler 흐름:
+  ChatOpenAI.invoke() / ChatAnthropic.invoke()
+    → on_chat_model_start
+      → super().on_chat_model_start()
+      → parent_run_id is None? → update_trace(session_id=...) ✅
+```
+
+**위치**: `src/core/observe.py` — `create_callback_handler()` 함수  
+**적용**: `src/core/llm_factory.py` — `LLMFactory.create()`에서 자동 사용
+
+### 7.5 자주 하는 실수
+
+```python
+# ❌ session_id를 노드별로 하드코딩 (traces가 각각 다른 session으로 분산)
+with langfuse_session(session_id=f"analyze-attempt-{retry_count}"):
+
+# ✅ state에서 통합 session_id 사용 (모든 trace가 하나의 session으로 묶임)
+with langfuse_session(session_id=state.get("session_id", "unknown")):
+
+# ❌ initial_state에 session_id 누락 (session이 "unknown"으로 표시)
+initial_state = {"file_path": "data.csv", "steps_log": []}
+
+# ✅ initial_state에 session_id 포함
+initial_state = {"file_path": "data.csv", "session_id": session_id, "steps_log": []}
+
+# ❌ metadata 누락 (session_id가 Langfuse에 전달되지 않음)
+response = llm.invoke(prompt, config={"callbacks": callbacks})
+
+# ✅ metadata 포함 (langfuse_session이 반환한 lf_metadata 전달)
+response = llm.invoke(prompt, config={"callbacks": callbacks, "metadata": lf_metadata})
+```
 
 ---
 
-## 8. 참고 파일
+## 8. 구현 우선순위
+
+| 순위 | 노드 | 상태 | 이유 |
+|------|------|------|------|
+| 1 | `load_data` | ✅ 완료 | CSV/PDF/DOCX 파일 로드 + 타입 분류 |
+| 2 | `analyze_document` | ✅ 완료 | 문서 분석 핵심 기능 |
+| 3 | `evaluate_results` | ✅ 완료 | tabular/document 분기 품질 평가 |
+| 4 | `generate_report` | ✅ 완료 | tabular/document 분기 보고서 생성 |
+| 5 | `analyze_data` | 🟢 예시 | tabular 분석 (코드 생성+REPL) |
+| 6 | `preprocess_data` | 🟡 스켈레톤 | 데이터 품질 개선 |
+| 7 | `human_review` | ✅ 기본 | 저장/알림 확장 |
+
+---
+
+## 9. 서브그래프 (Subgraph)
+
+### 9.1 개념
+
+서브그래프는 **하나의 노드 내부**에서 복잡한 워크플로우가 필요할 때 사용합니다.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  analyze_data (노드)                                     │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │  [서브그래프]                                        ││
+│  │  code_generation → code_execution → result_validation││
+│  └─────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────┘
+```
+
+### 9.2 언제 사용하나?
+
+| 상황 | 서브그래프 사용 |
+|------|----------------|
+| 노드 로직이 단순함 | ❌ 불필요 |
+| 노드 내부에 여러 단계가 있음 | ✅ 권장 |
+| 노드 내부에 조건 분기/반복이 있음 | ✅ 권장 |
+| 여러 노드를 묶고 싶음 | ❌ 잘못된 사용 (메인 그래프에서 처리) |
+
+### 9.3 주의사항
+
+⚠️ **서브그래프 ≠ 여러 노드 묶기**
+
+각 노드(`analyze_data`, `evaluate_results` 등)는 **독립적인 에이전트**입니다. 이들을 하나의 서브그래프로 묶지 마세요.
+
+```
+# ❌ 잘못된 사용
+analysis_subgraph = analyze + evaluate + finalize  # 독립 에이전트를 묶음
+
+# ✅ 올바른 사용
+analyze_data 노드 내부에서:
+  - 코드 생성 단계
+  - 코드 실행 단계
+  - 결과 검증 단계
+  → 이것을 서브그래프로 구성
+```
+
+### 9.4 템플릿 위치
+
+```
+src/agent/subgraphs/
+└── _template/              ← 팀원용 복사 템플릿
+    ├── __init__.py
+    ├── state.py            # State 정의 (Input/Internal/Output)
+    ├── graph.py            # 워크플로우 정의
+    └── nodes/
+        ├── __init__.py
+        ├── process_input.py
+        └── process_output.py
+```
+
+### 9.5 사용 방법
+
+1. `_template` 폴더를 복사하여 자신의 서브그래프 생성
+2. `state.py`에서 State 정의
+3. `nodes/`에 노드 함수 구현
+4. `graph.py`에서 워크플로우 구성
+5. 메인 노드에서 서브그래프 호출
+
+```python
+# 메인 노드에서 서브그래프 호출 예시
+from src.agent.subgraphs.my_subgraph import create_my_subgraph
+
+def analyze_data(state: AgentState) -> AgentState:
+    subgraph = create_my_subgraph()
+    
+    # 서브그래프 입력 구성
+    sub_input = {
+        "input_data": state["clean_data"],
+        # ... 기타 필드
+    }
+    
+    # 서브그래프 실행
+    sub_result = subgraph.invoke(sub_input)
+    
+    # 결과 반환
+    return {
+        "analysis_results": [sub_result["output_result"]],
+        "steps_log": sub_result["steps_log"]
+    }
+```
+
+---
+
+## 10. 데이터 플로우 예시
+
+### 10.1 CSV 파일 처리
+
+```
+Input: "data.csv"
+  → load_data: CSV 로드, file_type="tabular", raw_data=df.to_dict()
+  → preprocess_data: 전처리, clean_data 생성
+  → analyze_data: LLM이 Python 코드 생성 → REPL 실행 → 분석 결과
+  → evaluate_results: tabular 기준으로 평가
+  → (APPROVE) generate_report: 데이터 분석 보고서 생성
+  → human_review: 사람 확인
+  → END
+```
+
+### 10.2 PDF 파일 처리
+
+```
+Input: "report.pdf"
+  → load_data: PDF 텍스트 추출 (또는 Gemini Vision), file_type="document"
+  → analyze_document: LLM이 요약/키워드/수치/인사이트 추출
+  → evaluate_results: document 기준으로 평가
+  → (REJECT) analyze_document: 피드백 반영하여 재분석
+  → evaluate_results: 재평가
+  → (APPROVE) generate_report: 문서 분석 보고서 생성
+  → human_review: 사람 확인
+  → END
+```
+
+### 10.3 DOCX 파일 처리
+
+```
+Input: "meeting_notes.docx"
+  → load_data: python-docx 텍스트 추출, file_type="document"
+  → analyze_document: LLM 분석
+  → evaluate_results → generate_report → human_review → END
+```
+
+---
+
+## 11. 확장 포인트
+
+| 확장 | 방법 |
+|------|------|
+| 새 파일 형식 (e.g., XLSX, JSON) | `load_data.py`에 추출 함수 추가 + 적절한 `file_type` 분류 |
+| 새 분석 노드 | `nodes/` 폴더에 노드 추가 → `graph.py`에 라우팅 확장 |
+| 서브그래프 | `src/agent/subgraphs/_template/` 복사하여 독립 워크플로우 생성 |
+| 보고서 형식 확장 (HTML, PPT) | `generate_report.py`에 형식 분기 추가 |
+
+---
+
+## 12. 참고 파일
 
 | 파일 | 설명 |
 |------|------|
-| `src/graph.py` | LangGraph 워크플로우 정의 |
-| `src/agent/state.py` | AgentState 정의 |
-| `src/agent/nodes/*.py` | 각 노드 구현 |
-| `src/core/llm_factory.py` | LLM 생성 + Langfuse 통합 |
-| `AGENTS.md` | 코딩 에이전트용 가이드라인 |
+| `src/graph.py` | LangGraph 워크플로우 정의 (라우팅 로직 포함) |
+| `src/agent/state.py` | AgentState 정의 (file_type 필드 포함) |
+| `src/agent/nodes/load_data.py` | CSV/PDF/DOCX 파일 로드 |
+| `src/agent/nodes/analyze_document.py` | 문서 분석 노드 |
+| `src/agent/nodes/analyze_data.py` | 데이터 분석 노드 |
+| `src/agent/nodes/evaluate_results.py` | 품질 평가 노드 (file_type 분기) |
+| `src/agent/nodes/generate_report.py` | 보고서 생성 노드 (file_type 분기) |
+| `src/core/llm_factory.py` | LLM 생성 + SessionAwareCallbackHandler 통합 |
+| `src/core/observe.py` | Langfuse observability (langfuse_session, @observe, SessionAwareCallbackHandler) |
+| `webapp/app.py` | Streamlit 웹앱 진입점 (session_id = thread_id) |
+
