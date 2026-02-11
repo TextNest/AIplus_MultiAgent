@@ -3,9 +3,8 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langfuse.langchain import CallbackHandler
 
-from .observe import is_langfuse_enabled
+from .observe import create_callback_handler, is_langfuse_enabled
 
 
 class LLMFactory:
@@ -33,8 +32,11 @@ class LLMFactory:
             llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
             
             # session_id를 기록하려면 langfuse_session 컨텍스트 사용
-            with langfuse_session(session_id="my-session-id"):
-                response = llm.invoke(prompt, config={'callbacks': callbacks})
+            with langfuse_session(session_id="my-session-id") as lf_metadata:
+                response = llm.invoke(prompt, config={
+                    'callbacks': callbacks,
+                    'metadata': lf_metadata,
+                })
         """
         # 1. 모델 객체 생성
         if provider == "google":
@@ -58,12 +60,11 @@ class LLMFactory:
         else:
             raise ValueError(f"Unknown provider: {provider}")
 
-        # 2. Langfuse Callback 생성
+        # 2. Langfuse Callback 생성 (SessionAwareCallbackHandler 사용)
         callbacks = []
         
-        # Langfuse 3.x: 환경변수를 자동으로 읽음
-        if is_langfuse_enabled():
-            handler = CallbackHandler()
+        handler = create_callback_handler()
+        if handler is not None:
             callbacks.append(handler)
             
         return llm, callbacks

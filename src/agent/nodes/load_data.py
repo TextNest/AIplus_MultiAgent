@@ -18,7 +18,7 @@ from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session
 
 
-def _extract_pdf_via_gemini(file_path: str) -> str:
+def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
     """이미지 기반 PDF → Gemini Vision으로 텍스트 추출 (폴백)"""
     llm, callbacks = LLMFactory.create(
         provider="google",
@@ -42,8 +42,8 @@ def _extract_pdf_via_gemini(file_path: str) -> str:
         ]
     )
 
-    with langfuse_session(session_id="document_analyzer_vision"):
-        resp = llm.invoke([msg], config={"callbacks": callbacks})
+    with langfuse_session(session_id=session_id, tags=["load_data", "vision_fallback"]) as lf_metadata:
+        resp = llm.invoke([msg], config={"callbacks": callbacks, "metadata": lf_metadata})
 
     if hasattr(resp, "content"):
         c = resp.content
@@ -57,7 +57,7 @@ def _extract_pdf_via_gemini(file_path: str) -> str:
     return str(resp)
 
 
-def extract_pdf_text(file_path: str) -> str:
+def extract_pdf_text(file_path: str, session_id: str = "unknown") -> str:
     """
     PDF 파일에서 텍스트 추출
     - 일반 PDF: PyMuPDF로 직접 추출
@@ -74,7 +74,7 @@ def extract_pdf_text(file_path: str) -> str:
 
     # 페이지당 평균 50자 미만이면 이미지 기반으로 판단 → Gemini Vision 사용
     if pages and total_chars < 50 * len(pages):
-        return _extract_pdf_via_gemini(file_path)
+        return _extract_pdf_via_gemini(file_path, session_id=session_id)
 
     return "\n\n".join(p for p in text_parts if p)
 
@@ -98,6 +98,7 @@ def load_data(state: AgentState) -> AgentState:
         AgentState: raw_data, file_type, steps_log 업데이트
     """
     file_path = state["file_path"]
+    wf_session_id = state.get("session_id", "unknown")
     
     if not os.path.exists(file_path):
         return {
@@ -118,7 +119,7 @@ def load_data(state: AgentState) -> AgentState:
             }
             
         elif ext == "pdf":
-            text = extract_pdf_text(file_path)
+            text = extract_pdf_text(file_path, session_id=wf_session_id)
             return {
                 "file_type": "document",
                 "raw_data": {"content": text, "source": file_path},

@@ -10,6 +10,9 @@ def merge_logs(left: List[str], right: List[str]) -> List[str]:
     return left + right
 
 class AgentState(TypedDict):
+    # Workflow session identifier (shared across all nodes for Langfuse tracing)
+    session_id: Optional[str]
+    
     # Input data path or raw data
     file_path: str
     file_type: Optional[Literal["tabular", "document"]]

@@ -37,6 +37,7 @@ def analyze_data(state: AgentState) -> AgentState:
     clean_data = state.get("clean_data")
     retry_count = state.get("retry_count", 0)
     previous_feedback = state.get("evaluation_feedback")
+    wf_session_id = state.get("session_id", "unknown")
     
     if clean_data is None:
         return {
@@ -56,7 +57,7 @@ def analyze_data(state: AgentState) -> AgentState:
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemma-3-27b-it",
             temperature=0,  # 코드 생성은 결정적으로
         )
         
@@ -113,10 +114,13 @@ print(f"Data loaded: {{len(df)}} rows, {{len(df.columns)}} columns")
 
         # Step 4: LLM 호출 (Langfuse 세션으로 추적)
         with langfuse_session(
-            session_id=f"analyze-attempt-{retry_count + 1}",
+            session_id=wf_session_id,
             tags=["analyze_data", f"attempt_{retry_count + 1}"]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+        ) as lf_metadata:
+            response = llm.invoke(prompt, config={
+                "callbacks": callbacks,
+                "metadata": lf_metadata,
+            })
         
         # Step 5: 응답에서 코드 추출
         content = response.content

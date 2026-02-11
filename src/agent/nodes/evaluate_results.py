@@ -38,6 +38,7 @@ def evaluate_results(state: AgentState) -> AgentState:
     raw_data = state.get("raw_data")
     file_type = state.get("file_type", "tabular")
     retry_count = state.get("retry_count", 0)
+    wf_session_id = state.get("session_id", "unknown")
     
     if not analysis_results:
         return {
@@ -49,7 +50,7 @@ def evaluate_results(state: AgentState) -> AgentState:
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemma-3-27b-it",
             temperature=0,  # 평가는 일관성 있게
         )
         
@@ -127,10 +128,13 @@ def evaluate_results(state: AgentState) -> AgentState:
 
         # Step 3: LLM 호출
         with langfuse_session(
-            session_id=f"evaluate-attempt-{retry_count}",
-            tags=["evaluate_results", str(file_type)]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+            session_id=wf_session_id,
+            tags=["evaluate_results", str(file_type), f"attempt_{retry_count}"]
+        ) as lf_metadata:
+            response = llm.invoke(prompt, config={
+                "callbacks": callbacks,
+                "metadata": lf_metadata,
+            })
         
         # Step 4: 응답 처리
         content = response.content

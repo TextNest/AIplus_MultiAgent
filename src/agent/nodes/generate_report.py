@@ -42,6 +42,7 @@ def generate_report(state: AgentState) -> AgentState:
     raw_data = state.get("raw_data")
     file_type = state.get("file_type", "tabular")
     file_path = state.get("file_path", "데이터")
+    wf_session_id = state.get("session_id", "unknown")
     
     if not analysis_results:
         return {
@@ -53,7 +54,7 @@ def generate_report(state: AgentState) -> AgentState:
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemma-3-27b-it",
             temperature=0.3,  # 보고서는 약간의 창의성 허용
         )
         
@@ -151,10 +152,13 @@ def generate_report(state: AgentState) -> AgentState:
 
         # Step 4: LLM 호출
         with langfuse_session(
-            session_id="generate-report",
+            session_id=wf_session_id,
             tags=["generate_report", "markdown", str(file_type)]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+        ) as lf_metadata:
+            response = llm.invoke(prompt, config={
+                "callbacks": callbacks,
+                "metadata": lf_metadata,
+            })
         
         # Step 5: 응답 처리
         content = response.content

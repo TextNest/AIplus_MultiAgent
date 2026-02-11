@@ -18,6 +18,7 @@ def analyze_document(state: AgentState) -> AgentState:
     raw_data = state.get("raw_data")
     retry_count = state.get("retry_count", 0)
     previous_feedback = state.get("evaluation_feedback")
+    wf_session_id = state.get("session_id", "unknown")
     
     if not raw_data or "content" not in raw_data:
         return {
@@ -34,7 +35,7 @@ def analyze_document(state: AgentState) -> AgentState:
         # Step 1: LLM 생성
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemini-2.0-flash",
+            model="gemma-3-27b-it",
             temperature=0,
         )
         
@@ -70,10 +71,13 @@ def analyze_document(state: AgentState) -> AgentState:
 
         # Step 4: LLM 호출
         with langfuse_session(
-            session_id=f"analyze-doc-attempt-{retry_count + 1}",
+            session_id=wf_session_id,
             tags=["analyze_document", f"attempt_{retry_count + 1}"]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+        ) as lf_metadata:
+            response = llm.invoke(prompt, config={
+                "callbacks": callbacks,
+                "metadata": lf_metadata,
+            })
         
         # Step 5: 응답 처리
         content = response.content

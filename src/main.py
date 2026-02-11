@@ -37,6 +37,7 @@ def main():
     # Initial State
     initial_state = {
         "file_path": "src/data/sample.csv",
+        "session_id": session_id,
         "steps_log": [],
         "analysis_results": []
     }

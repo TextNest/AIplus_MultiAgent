@@ -221,6 +221,9 @@ return {"file_type": "document", "raw_data": {"content": text, "source": file_pa
 
 ```python
 class AgentState(TypedDict):
+    # 워크플로우 세션 ID (모든 노드가 공유 — Langfuse 세션 추적용)
+    session_id: Optional[str]
+    
     # 입력
     file_path: str
     file_type: Optional[Literal["tabular", "document"]]  # 라우팅 키
@@ -332,7 +335,140 @@ def should_continue_human(state: AgentState):
 
 ---
 
-## 7. 구현 우선순위
+## 7. Langfuse 세션 통합 (Observability)
+
+### 7.1 아키텍처
+
+그래프 실행 시 모든 노드의 LLM 호출이 **하나의 Langfuse session**으로 묶입니다.
+
+```
+main.py / webapp/app.py
+  │
+  │  session_id = "session_abc12345"
+  │  initial_state = { "session_id": session_id, ... }
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LangGraph Workflow (session_id가 state를 통해 전파)         │
+│                                                             │
+│  load_data ──→ analyze_data ──→ evaluate_results ──→ ...    │
+│  (session_id)   (session_id)     (session_id)               │
+│       │              │                │                      │
+│       ▼              ▼                ▼                      │
+│  langfuse_session(session_id=state["session_id"])            │
+│       │              │                │                      │
+│       ▼              ▼                ▼                      │
+│  ┌─────────────────────────────────────────┐                │
+│  │  Langfuse Dashboard                     │                │
+│  │  Session: "session_abc12345"             │                │
+│  │  ├─ Trace: load_data (vision_fallback)  │                │
+│  │  ├─ Trace: analyze_data (attempt_1)     │                │
+│  │  ├─ Trace: evaluate_results (attempt_1) │                │
+│  │  ├─ Trace: analyze_data (attempt_2)     │                │
+│  │  ├─ Trace: evaluate_results (attempt_2) │                │
+│  │  └─ Trace: generate_report              │                │
+│  └─────────────────────────────────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 session_id 흐름
+
+| 위치 | 역할 |
+|------|------|
+| `main.py` / `webapp/app.py` | `session_id` 생성 → `initial_state`에 주입 |
+| `AgentState.session_id` | 모든 노드에서 공유되는 세션 식별자 |
+| 각 노드 | `state.get("session_id")` → `langfuse_session(session_id=...)` |
+| `langfuse_session()` | metadata에 `langfuse_session_id` 키로 전달 |
+| `SessionAwareCallbackHandler` | metadata에서 session_id를 읽어 trace에 적용 |
+
+**진입점별 session_id 설정**:
+
+```python
+# main.py (CLI)
+session_id = "session_" + str(uuid.uuid4())[:8]
+initial_state = {
+    "file_path": "data.csv",
+    "session_id": session_id,
+    ...
+}
+
+# webapp/app.py (Streamlit) — thread_id를 session_id로 재사용
+initial_state = {
+    "file_path": file_path,
+    "session_id": thread_id,
+    ...
+}
+```
+
+### 7.3 노드에서의 사용 패턴
+
+모든 LLM 호출 노드는 동일한 패턴을 따릅니다:
+
+```python
+def my_node(state: AgentState) -> AgentState:
+    wf_session_id = state.get("session_id", "unknown")
+    llm, callbacks = LLMFactory.create(provider="google", model="gemma-3-27b-it")
+
+    with langfuse_session(
+        session_id=wf_session_id,                    # ← state에서 가져온 통합 ID
+        tags=["my_node", f"attempt_{retry_count}"]   # ← 노드/시도를 tags로 구분
+    ) as lf_metadata:
+        response = llm.invoke(prompt, config={
+            "callbacks": callbacks,
+            "metadata": lf_metadata,
+        })
+```
+
+### 7.4 SessionAwareCallbackHandler
+
+**문제**: Langfuse의 기본 `CallbackHandler`는 `on_chain_start`에서만 `session_id`를 trace에 적용합니다. `ChatOpenAI`/`ChatAnthropic`의 `llm.invoke()`는 `on_chain_start`를 거치지 않아 session이 누락됩니다.
+
+**해결**: `src/core/observe.py`에 `SessionAwareCallbackHandler`를 구현하여, `on_chat_model_start`와 `on_llm_start`에서도 root trace일 때 `update_trace(session_id=...)`를 호출합니다.
+
+```
+기본 CallbackHandler 흐름:
+  ChatGoogleGenerativeAI.invoke()
+    → on_chain_start ← session_id 적용됨 ✅
+      → on_chat_model_start
+
+  ChatOpenAI.invoke() / ChatAnthropic.invoke()
+    → on_chat_model_start ← session_id 적용 안 됨 ❌
+
+SessionAwareCallbackHandler 흐름:
+  ChatOpenAI.invoke() / ChatAnthropic.invoke()
+    → on_chat_model_start
+      → super().on_chat_model_start()
+      → parent_run_id is None? → update_trace(session_id=...) ✅
+```
+
+**위치**: `src/core/observe.py` — `create_callback_handler()` 함수  
+**적용**: `src/core/llm_factory.py` — `LLMFactory.create()`에서 자동 사용
+
+### 7.5 자주 하는 실수
+
+```python
+# ❌ session_id를 노드별로 하드코딩 (traces가 각각 다른 session으로 분산)
+with langfuse_session(session_id=f"analyze-attempt-{retry_count}"):
+
+# ✅ state에서 통합 session_id 사용 (모든 trace가 하나의 session으로 묶임)
+with langfuse_session(session_id=state.get("session_id", "unknown")):
+
+# ❌ initial_state에 session_id 누락 (session이 "unknown"으로 표시)
+initial_state = {"file_path": "data.csv", "steps_log": []}
+
+# ✅ initial_state에 session_id 포함
+initial_state = {"file_path": "data.csv", "session_id": session_id, "steps_log": []}
+
+# ❌ metadata 누락 (session_id가 Langfuse에 전달되지 않음)
+response = llm.invoke(prompt, config={"callbacks": callbacks})
+
+# ✅ metadata 포함 (langfuse_session이 반환한 lf_metadata 전달)
+response = llm.invoke(prompt, config={"callbacks": callbacks, "metadata": lf_metadata})
+```
+
+---
+
+## 8. 구현 우선순위
 
 | 순위 | 노드 | 상태 | 이유 |
 |------|------|------|------|
@@ -346,9 +482,9 @@ def should_continue_human(state: AgentState):
 
 ---
 
-## 8. 서브그래프 (Subgraph)
+## 9. 서브그래프 (Subgraph)
 
-### 8.1 개념
+### 9.1 개념
 
 서브그래프는 **하나의 노드 내부**에서 복잡한 워크플로우가 필요할 때 사용합니다.
 
@@ -362,7 +498,7 @@ def should_continue_human(state: AgentState):
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 언제 사용하나?
+### 9.2 언제 사용하나?
 
 | 상황 | 서브그래프 사용 |
 |------|----------------|
@@ -371,7 +507,7 @@ def should_continue_human(state: AgentState):
 | 노드 내부에 조건 분기/반복이 있음 | ✅ 권장 |
 | 여러 노드를 묶고 싶음 | ❌ 잘못된 사용 (메인 그래프에서 처리) |
 
-### 8.3 주의사항
+### 9.3 주의사항
 
 ⚠️ **서브그래프 ≠ 여러 노드 묶기**
 
@@ -389,7 +525,7 @@ analyze_data 노드 내부에서:
   → 이것을 서브그래프로 구성
 ```
 
-### 8.4 템플릿 위치
+### 9.4 템플릿 위치
 
 ```
 src/agent/subgraphs/
@@ -403,7 +539,7 @@ src/agent/subgraphs/
         └── process_output.py
 ```
 
-### 8.5 사용 방법
+### 9.5 사용 방법
 
 1. `_template` 폴더를 복사하여 자신의 서브그래프 생성
 2. `state.py`에서 State 정의
@@ -436,9 +572,9 @@ def analyze_data(state: AgentState) -> AgentState:
 
 ---
 
-## 9. 데이터 플로우 예시
+## 10. 데이터 플로우 예시
 
-### 9.1 CSV 파일 처리
+### 10.1 CSV 파일 처리
 
 ```
 Input: "data.csv"
@@ -451,7 +587,7 @@ Input: "data.csv"
   → END
 ```
 
-### 9.2 PDF 파일 처리
+### 10.2 PDF 파일 처리
 
 ```
 Input: "report.pdf"
@@ -465,7 +601,7 @@ Input: "report.pdf"
   → END
 ```
 
-### 9.3 DOCX 파일 처리
+### 10.3 DOCX 파일 처리
 
 ```
 Input: "meeting_notes.docx"
@@ -476,7 +612,7 @@ Input: "meeting_notes.docx"
 
 ---
 
-## 10. 확장 포인트
+## 11. 확장 포인트
 
 | 확장 | 방법 |
 |------|------|
@@ -487,7 +623,7 @@ Input: "meeting_notes.docx"
 
 ---
 
-## 11. 참고 파일
+## 12. 참고 파일
 
 | 파일 | 설명 |
 |------|------|
@@ -498,6 +634,7 @@ Input: "meeting_notes.docx"
 | `src/agent/nodes/analyze_data.py` | 데이터 분석 노드 |
 | `src/agent/nodes/evaluate_results.py` | 품질 평가 노드 (file_type 분기) |
 | `src/agent/nodes/generate_report.py` | 보고서 생성 노드 (file_type 분기) |
-| `src/core/llm_factory.py` | LLM 생성 + Langfuse 통합 |
-| `src/core/observe.py` | Langfuse observability (langfuse_session, @observe) |
+| `src/core/llm_factory.py` | LLM 생성 + SessionAwareCallbackHandler 통합 |
+| `src/core/observe.py` | Langfuse observability (langfuse_session, @observe, SessionAwareCallbackHandler) |
+| `webapp/app.py` | Streamlit 웹앱 진입점 (session_id = thread_id) |
 
