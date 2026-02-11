@@ -30,15 +30,18 @@ def main():
     
     # Initialize the graph
     session_id = "session_" + str(uuid.uuid4())[:8]
-    print(f"🆔 Session ID: {session_id}")
+    print(f"Session ID: {session_id}")
     
     app = create_graph()
 
     # Initial State
+    from src.core.config import config
+    
     initial_state = {
         "file_path": "src/data/sample.csv",
         "steps_log": [],
-        "analysis_results": []
+        "analysis_results": [],
+        "report_format": config.REPORT_FORMAT
     }
     
     # Run the graph

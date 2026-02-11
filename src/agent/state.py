@@ -25,6 +25,7 @@ class AgentState(TypedDict):
     
     # Final Report
     final_report: Optional[str]
+    report_format: str # markdown, html, pdf, pptx
 
     # Human Feedback
     human_feedback: Optional[str]

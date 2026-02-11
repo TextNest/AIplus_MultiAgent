@@ -19,7 +19,12 @@ def analyze_data(state: AgentState) -> AgentState:
         return {"steps_log": ["[Analyze] ERROR: No clean data available"]}
 
     df = pd.DataFrame(clean_data)
-    # df_summary = get_df_summary(df)
+    
+    # Generate simple summary if utility is missing
+    try:
+        df_summary = df.describe(include='all').to_string()
+    except Exception:
+        df_summary = str(df.head())
     
     retry_count = state.get("retry_count", 0)
     feedback = state.get("evaluation_feedback", "")
@@ -37,12 +42,18 @@ def analyze_data(state: AgentState) -> AgentState:
         )
         
         response = structured_llm.invoke(prompt)
-        code = response.code
+        
+        # Handle DummyLLM response format vs structured output
+        if hasattr(response, 'code'):
+            code = response.code
+        else:
+            code = response # Fallback if model just returns text (should not happen with structured_output)
+
         
         # 2. Execute Code
         repl = PythonREPL()
         
-        temp_csv = "analysis_input.csv"
+        temp_csv = "src/data/sample.csv"
         df.to_csv(temp_csv, index=False)
         
         setup_code = f"import pandas as pd\ndf = pd.read_csv('{temp_csv}')\n"
@@ -65,5 +76,5 @@ def analyze_data(state: AgentState) -> AgentState:
         return {
             "analysis_results": [f"Error: {str(e)}"],
             "steps_log": [f"[Analyze] Error: {str(e)}"],
-            "retry_count": retry_count + 1 # Critical Fix: Increment retry count on error
+            "retry_count": retry_count + 1 
         }

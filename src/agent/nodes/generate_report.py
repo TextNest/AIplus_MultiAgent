@@ -1,45 +1,32 @@
 """
 Generate Report Node
-담당: 이수현
-
-역할: 분석 결과를 기반으로 보고서 생성
-입력: analysis_results, clean_data
-출력: final_report, steps_log
-
-=============================================================================
-구현 가이드
-=============================================================================
-이 노드는 분석 결과를 바탕으로 읽기 좋은 보고서를 생성합니다.
-
-보고서 형식:
-- 기본: Markdown (현재 구현)
-- 확장 가능: HTML, PowerPoint (python-pptx)
-
-보고서 구조 (예시):
-1. 요약 (Executive Summary)
-2. 데이터 개요
-3. 주요 발견사항
-4. 상세 분석 결과
-5. 결론 및 권고사항
-
-팁:
-- temperature를 약간 높여서 (0.3~0.5) 자연스러운 문장 생성
-- 분석 결과의 핵심만 추출하여 간결하게 정리
-=============================================================================
+Roles: Analyzer, Reporter
+Input: analysis_results, clean_data, figure_list
+Output: final_report, steps_log
 """
+import os
+import io
 import pandas as pd
+import markdown
+
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from xhtml2pdf import pisa
+
 from ..state import AgentState
 from ...core.llm_factory import LLMFactory, langfuse_session
 from ..prompt_engineering.prompts import REPORT_PROMPT
 
 def generate_report(state: AgentState) -> AgentState:
     """
-    분석 결과를 바탕으로 Markdown 보고서를 생성합니다.
+    Generates a report based on analysis results.
+    Supports Markdown, HTML, PDF, and PowerPoint formats.
     """
     analysis_results = state.get("analysis_results", [])
     clean_data = state.get("clean_data")
     file_path = state.get("file_path", "Data")
     figure_list = state.get("figure_list", [])
+    report_format = state.get("report_format", "markdown").lower()
     
     if not analysis_results:
         return {
@@ -48,110 +35,148 @@ def generate_report(state: AgentState) -> AgentState:
         }
     
     try:  
-        # Step 1: LLM 생성
-        llm, callbacks = LLMFactory.create(
-            provider="google",
-            model="gemini-2.5-flash",
-            temperature=0.3,  # 보고서는 약간의 창의성 허용
-        )
+        # Step 1: Generate Markdown Content via LLM
+        markdown_content = _generate_markdown_content(analysis_results, clean_data, file_path, figure_list)
         
-        # Step 2: 데이터 컨텍스트 준비
-        data_summary = ""
-        if clean_data:
-            df = pd.DataFrame(clean_data)
-            data_summary = f"""
-- 데이터 출처: {file_path}
-- 총 행 수: {len(df):,}
-- 총 컬럼 수: {len(df.columns)}
-- 컬럼 목록: {', '.join(df.columns)}
-"""
+        # Step 2: Convert to Requested Format
+        final_output = markdown_content # Default
+        log_message = "[Report] Generated Markdown report successfully"
         
-        # Step 3: 시각화 자료
-        figure_markdown = ""
-        if figure_list:
-            figure_markdown = "### 분석 시각화 자료\n"
-            for fig in figure_list:
-                figure_markdown += f"![{fig}]({fig})\n"
+        output_dir = "output"
+        os.makedirs(output_dir, exist_ok=True)
         
-        # Step 4: 프롬프트
-                all_results = "\n\n---\n\n".join(analysis_results)
-        
-        prompt = REPORT_PROMPT.format(
-            data_summary=data_summary,
-            all_results=all_results,
-            figure_markdown=figure_markdown
-        )
+        if report_format == "html":
+            html_content = markdown.markdown(markdown_content)
+            # Add basic styling
+            styled_html = f"<html><body><style>body {{ font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }} img {{ max-width: 100%; }}</style>{html_content}</body></html>"
+            
+            output_path = os.path.join(output_dir, "report.html")
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(styled_html)
+            
+            final_output = f"Report saved to: {output_path}"
+            log_message = f"[Report] Generated HTML report at {output_path}"
+            
+        elif report_format == "pdf":
+            html_content = markdown.markdown(markdown_content)
+            # Add basic styling for PDF
+            styled_html = f"<html><body><style>body {{ font-family: sans-serif; }} img {{ max-width: 100%; }}</style>{html_content}</body></html>"
+            
+            output_path = os.path.join(output_dir, "report.pdf")
+            with open(output_path, "wb") as f:
+                pisa_status = pisa.CreatePDF(html_content, dest=f)
+            
+            if pisa_status.err:
+                raise Exception("PDF generation failed")
+                
+            final_output = f"Report saved to: {output_path}"
+            log_message = f"[Report] Generated PDF report at {output_path}"
+            
+        elif report_format == "pptx":
+            output_path = os.path.join(output_dir, "report.pptx")
+            _generate_pptx(analysis_results, figure_list, output_path)
+            
+            final_output = f"Report saved to: {output_path}"
+            log_message = f"[Report] Generated PowerPoint report at {output_path}"
 
-        # Step 5: LLM 호출
-        with langfuse_session(
-            session_id="generate-report",
-            tags=["generate_report", "markdown"]
-        ):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
-        
-        # Step 5: 응답 처리
-        content = response.content
-        if isinstance(content, list):
-            content = "".join([str(part) for part in content])
-        
-        # Step 6: 보고서 반환
         return {
-            "final_report": content,
-            "steps_log": ["[Report] Generated Markdown report successfully"]
+            "final_report": final_output,
+            "steps_log": [log_message]
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {
-            "final_report": f"# Error\n\n보고서 생성 중 오류 발생: {str(e)}",
+            "final_report": f"# Error\n\nReport generation failed: {str(e)}",
             "steps_log": [f"[Report] ERROR: {str(e)}"]
         }
 
-
-# =============================================================================
-# 확장 예시: PowerPoint 보고서 생성 (선택적 구현)
-# =============================================================================
-"""
-from pptx import Presentation
-from pptx.util import Inches, Pt
-
-def generate_pptx_report(state: AgentState) -> AgentState:
-    '''
-    PowerPoint 보고서 생성 예시 (python-pptx 필요)
-    pip install python-pptx
-    '''
-    analysis_results = state.get("analysis_results", [])
+def _generate_markdown_content(results, data, file_path, figures):
+    # LLM Setup
+    llm, callbacks = LLMFactory.create(
+        provider="google",
+        model="gemini-2.5-flash",
+        temperature=0.3,
+    )
     
-    # 프레젠테이션 생성
+    # Data Context
+    data_summary = ""
+    if data:
+        df = pd.DataFrame(data)
+        data_summary = f"""
+- Data Source: {file_path}
+- Rows: {len(df):,}
+- Columns: {len(df.columns)}
+- Column List: {', '.join(df.columns)}
+"""
+    
+    # Visualization Context
+    figure_markdown = ""
+    if figures:
+        figure_markdown = "### Key Visualizations\n"
+        for fig in figures:
+            figure_markdown += f"![{fig}]({fig})\n"
+    
+    all_results = "\n\n---\n\n".join(results)
+    
+    prompt = REPORT_PROMPT.format(
+        data_summary=data_summary,
+        all_results=all_results,
+        figure_markdown=figure_markdown
+    )
+
+    with langfuse_session(session_id="generate-report", tags=["generate_report"]):
+        response = llm.invoke(prompt, config={"callbacks": callbacks})
+    
+    content = response.content
+    if isinstance(content, list):
+        content = "".join([str(part) for part in content])
+        
+    # Appending figure markdown strictly might duplicate if LLM already includes it, 
+    # but ensuring it's there is safer if expected. 
+    # The prompt actually asks to include it, so we rely on LLM.
+    # But for dummy mode or consistency, let's just return content.
+    return content
+
+def _generate_pptx(analysis_results, figure_list, output_path):
     prs = Presentation()
     
-    # 제목 슬라이드
+    # Title Slide
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
     title = slide.shapes.title
     subtitle = slide.placeholders[1]
     
-    title.text = "데이터 분석 보고서"
-    subtitle.text = "자동 생성된 분석 결과"
+    title.text = "Data Analysis Report"
+    subtitle.text = "Generated by AIplus MultiAgent"
     
-    # 내용 슬라이드 추가
-    for i, result in enumerate(analysis_results, 1):
+    # Content Slides from Analysis Results
+    # We'll take the first analysis result as the main content for simplicity
+    if analysis_results:
         bullet_slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(bullet_slide_layout)
         shapes = slide.shapes
-        
         title_shape = shapes.title
         body_shape = shapes.placeholders[1]
         
-        title_shape.text = f"분석 결과 {i}"
+        title_shape.text = "Analysis Insights"
         tf = body_shape.text_frame
-        tf.text = result[:500]  # 길이 제한
-    
-    # 파일 저장
-    output_path = "output/report.pptx"
+        
+        # Naively truncate or use first chunk
+        text_content = analysis_results[0].replace("```python", "").replace("```", "")
+        # Limit text length roughly
+        tf.text = text_content[:500] + "..." if len(text_content) > 500 else text_content
+
+    # Figure Slides
+    for fig_path in figure_list:
+        if os.path.exists(fig_path):
+            blank_slide_layout = prs.slide_layouts[6]
+            slide = prs.slides.add_slide(blank_slide_layout)
+            
+            left = Inches(1)
+            top = Inches(1)
+            height = Inches(5.5)
+            slide.shapes.add_picture(fig_path, left, top, height=height)
+            
     prs.save(output_path)
-    
-    return {
-        "final_report": f"PowerPoint 보고서 생성됨: {output_path}",
-        "steps_log": ["[Report] Generated PowerPoint report"]
-    }
-"""
