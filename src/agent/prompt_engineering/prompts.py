@@ -37,3 +37,40 @@ You are a Data Analyst and Auditor. Write a professional business report includi
 ## 5. 결론 및 제언
    - 비즈니스 관점의 제언
 """
+
+
+ANALYSIS_PROMPT = """
+You are a Data Analyst.
+Data Summary:
+{df_summary}
+
+Previous Feedback (if any):
+{feedback}
+
+Task: Write Python code to analyze this data.
+- Calculate key statistics.
+- Create visualizations (matplotlib/seaborn). 
+- **CRITICAL**: If you generate a plot, save it as a PNG file (e.g., 'plot_1.png', 'plot_2.png').
+- Print summary insights.
+
+Constraints:
+- Assume dataframe is in variable `df`.
+- Do NOT read CSV again.
+- Python Code Only.
+"""
+
+EVALUATION_PROMPT = """
+You are a Data Analysis Auditor.
+
+Analysis Result:
+{last_result}
+
+Evaluate the quality of this analysis.
+- Does it contain Python code and execution results?
+- Is there any error?
+- Does it provide meaningful insights?
+- Were visualizations generated and saved if requested?
+
+If it is good, reply with only the word "APPROVE".
+If it is bad or has errors, reply with "REJECT: <reason>".
+"""
