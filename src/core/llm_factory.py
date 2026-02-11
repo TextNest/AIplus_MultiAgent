@@ -1,42 +1,11 @@
 import os
-from contextlib import contextmanager
-from typing import Optional, List, Dict
 
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse.langchain import CallbackHandler
-from langfuse import propagate_attributes
 
-
-@contextmanager
-def langfuse_session(
-    session_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    metadata: Optional[Dict[str, str]] = None,
-    tags: Optional[List[str]] = None,
-):
-    """
-    Langfuse session 컨텍스트 매니저.
-    이 컨텍스트 안에서 실행되는 모든 LLM 호출에 session_id, user_id 등이 기록됩니다.
-    
-    사용 예시:
-        llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
-        
-        with langfuse_session(session_id="session_123", user_id="user_456"):
-            response = llm.invoke(prompt, config={'callbacks': callbacks})
-    """
-    if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
-        with propagate_attributes(
-            session_id=session_id,
-            user_id=user_id,
-            metadata=metadata,
-            tags=tags,
-        ):
-            yield
-    else:
-        # Langfuse가 설정되지 않은 경우 그냥 통과
-        yield
+from .observe import is_langfuse_enabled
 
 
 class LLMFactory:
@@ -58,7 +27,8 @@ class LLMFactory:
             tuple: (llm, callbacks)
         
         사용 예시:
-            from src.core.llm_factory import LLMFactory, langfuse_session
+            from src.core.llm_factory import LLMFactory
+            from src.core.observe import langfuse_session
             
             llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
             
@@ -92,7 +62,7 @@ class LLMFactory:
         callbacks = []
         
         # Langfuse 3.x: 환경변수를 자동으로 읽음
-        if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
+        if is_langfuse_enabled():
             handler = CallbackHandler()
             callbacks.append(handler)
             

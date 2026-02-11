@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated, List, Optional
+from typing import TypedDict, Annotated, List, Optional, Literal
 import operator
 import pandas as pd
 
@@ -12,6 +12,7 @@ def merge_logs(left: List[str], right: List[str]) -> List[str]:
 class AgentState(TypedDict):
     # Input data path or raw data
     file_path: str
+    file_type: Optional[Literal["tabular", "document"]]
     raw_data: Optional[dict]
     
     # Processed data

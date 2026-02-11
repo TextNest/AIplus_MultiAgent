@@ -26,7 +26,8 @@ import re
 import pandas as pd
 from ..state import AgentState
 from ..tools import get_python_repl
-from ...core.llm_factory import LLMFactory, langfuse_session
+from ...core.llm_factory import LLMFactory
+from ...core.observe import langfuse_session
 
 
 def analyze_data(state: AgentState) -> AgentState:
