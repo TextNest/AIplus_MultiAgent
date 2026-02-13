@@ -39,3 +39,8 @@ class AgentState(TypedDict):
     
     # Retry counter for analysis loop (prevents infinite loops)
     retry_count: int
+
+    # Subgraph State
+    next_worker: Optional[str]
+    generated_formats: Annotated[List[str], merge_logs]
+

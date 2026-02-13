@@ -1,31 +1,32 @@
-"""
-Docstring for agent.subgraphs.generate_report.supervisor
-- LLM을 사용해 사용자의 요청이나 설정을 해석
-- 어떤 작업자를 부를지 결정
-"""
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
 from typing import Literal
-from state import ReportState
+from .state import ReportState
 
-# 수퍼바이저의 결정 구조체
-class SupervisorDecision(BaseModel):
-    next: Literal["create_pdf", "create_html", "create_pptx", "FINISH"] = Field(
-        description="다음으로 실행할 작업자 이름. 작업이 모두 끝나면 FINISH."
-    )
-def report_supervisor(state: ReportState):
-    # 설정이나 사용자 피드백에서 포맷 확인
-    report_format = state.get("report_format", "markdown")
+def report_supervisor(state: ReportState) -> dict:
+    """
+    Supervisor node that decides the next step in report generation.
+    """
+    final_report = state.get("final_report")
+    report_format = state.get("report_format", "markdown").lower()
+    generated_formats = state.get("generated_formats", [])
     
-    # 간단한 로직 또는 LLM 사용
-    # 예: 이미 수행한 작업인지 체크하여 종료하거나, 포맷에 맞는 작업자 호출
+    # helper to safely check format validity
+    def needs_format(fmt):
+        return fmt in report_format and fmt not in generated_formats
+
+    # 1. If Markdown content is missing, generate it first
+    if not final_report:
+        return {"next_worker": "generate_content"}
     
-    if "PDF" in report_format.upper():
-        return {"next_worker": "create_pdf"}
-    elif "HTML" in report_format.upper():
-        return {"next_worker": "create_html"}
-    # ...
-    
+    # 2. Check for requested formats that haven't been generated yet
+    if "pdf" in report_format and "pdf" not in generated_formats:
+        return {"next_worker": "create_pdf", "generated_formats": ["pdf"]}
+        
+    if "html" in report_format and "html" not in generated_formats:
+        return {"next_worker": "create_html", "generated_formats": ["html"]}
+        
+    if "pptx" in report_format and "pptx" not in generated_formats:
+        return {"next_worker": "create_pptx", "generated_formats": ["pptx"]}
+        
+    # 3. If all done (or just markdown requested), finish
     return {"next_worker": "FINISH"}

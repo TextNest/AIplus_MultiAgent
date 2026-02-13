@@ -7,9 +7,10 @@ from src.agent.nodes import (
     analyze_data,
     analyze_document,
     evaluate_results,
-    generate_report,
+    # generate_report, # Replaced by subgraph
     human_review,
 )
+from src.agent.subgraphs.generate_report.graph import create_report_subgraph
 
 # Configuration
 MAX_ANALYSIS_RETRIES = 3  # Maximum number of analysis retry attempts
@@ -55,7 +56,11 @@ def create_graph():
     workflow.add_node("analyze_data", analyze_data)
     workflow.add_node("analyze_document", analyze_document)
     workflow.add_node("evaluate_results", evaluate_results)
-    workflow.add_node("generate_report", generate_report)
+    
+    # Subgraph for Report Generation
+    report_subgraph = create_report_subgraph()
+    workflow.add_node("generate_report", report_subgraph)
+    
     workflow.add_node("human_review", human_review)
     
     # Set Entry Point
