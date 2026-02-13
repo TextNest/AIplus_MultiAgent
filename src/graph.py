@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.runnables import RunnableConfig
 from src.agent.state import AgentState,analyzeState
 from src.agent.nodes import (
     load_data,
@@ -89,13 +90,19 @@ def _build_analyze_subgraph():
     return analyze_workflow.compile(checkpointer=MemorySaver(), interrupt_before=["Wait"])
 
 
-def _analyze_data_wrapper(state: AgentState) -> AgentState:
+def _analyze_data_wrapper(state: AgentState, config: RunnableConfig) -> AgentState:
     """
     AgentState ↔ analyzeState 브릿지.
     메인 워크플로우의 file_path/clean_data를 서브그래프의 prepared_data로 매핑.
+    config에서 session_id/user_id를 받아 서브그래프에 전달.
     """
     file_path = state.get("file_path", "")
     retry_count = state.get("retry_count", 0)
+
+    # 메인 config에서 session_id/user_id 추출 (configurable 또는 state에서)
+    configurable = config.get("configurable", {})
+    session_id = configurable.get("session_id") or state.get("session_id", "unknown")
+    user_id = configurable.get("user_id") or state.get("user_id", "default_user")
 
     # 서브그래프 입력 구성
     sub_input = {
@@ -118,7 +125,11 @@ def _analyze_data_wrapper(state: AgentState) -> AgentState:
     try:
         analyze_app = _build_analyze_subgraph()
         import uuid
-        thread = {"configurable": {"thread_id": f"analyze-{uuid.uuid4().hex[:8]}"}}
+        thread = {"configurable": {
+            "thread_id": f"analyze-{uuid.uuid4().hex[:8]}",
+            "session_id": session_id,
+            "user_id": user_id,
+        }}
         sub_result = analyze_app.invoke(sub_input, thread)
 
         analysis_text = f"""

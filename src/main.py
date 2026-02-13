@@ -30,7 +30,7 @@ def main():
     
     # Initialize the graph
     session_id = "session_" + str(uuid.uuid4())[:8]
-    print(f"🆔 Session ID: {session_id}")
+    print(f"[ID] Session ID: {session_id}")
     
     app = create_graph()
 
@@ -44,7 +44,7 @@ def main():
     
     # Run the graph
     # We use stream to see steps
-    thread = {"configurable": {"thread_id": session_id}}
+    thread = {"configurable": {"thread_id": session_id, "session_id": session_id, "user_id": "default_user"}}
     
     print(f"Processing {initial_state['file_path']}...")
     
