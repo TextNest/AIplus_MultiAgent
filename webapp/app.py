@@ -48,6 +48,7 @@ def run_workflow(file_path: str, thread_id: str) -> Generator:
     
     initial_state = {
         "file_path": file_path,
+        "session_id": thread_id,
         "steps_log": [],
         "analysis_results": [],
         "retry_count": 0
@@ -98,6 +99,12 @@ init_session()
 def main():
     st.title("📊 AI 데이터 분석")
     
+    # 재분석 요청 → 바로 분석 실행
+    if st.session_state.get("reanalysis_requested"):
+        st.session_state.reanalysis_requested = False
+        start_analysis()
+        return
+    
     # 워크플로우 완료됨 → 결과 표시
     if st.session_state.workflow_completed:
         render_result()
@@ -112,7 +119,7 @@ def render_upload():
     
     st.markdown("CSV 파일을 업로드하면 AI가 자동으로 분석합니다.")
     st.divider()
-    
+
     uploaded_file = st.file_uploader(
         "CSV 파일 업로드",
         type=["csv"],
@@ -215,10 +222,11 @@ def render_result():
 
 
 def rerun_analysis():
-    """재분석 실행 (거절 시)"""
+    """재분석 실행 (거절 시) - 같은 파일로 바로 재분석"""
+    st.session_state.thread_id = str(uuid.uuid4())  # 새 thread로 깨끗하게 재실행
     st.session_state.workflow_completed = False
     st.session_state.result_approved = False
-    # thread_id는 유지하여 같은 파일로 재분석
+    st.session_state.reanalysis_requested = True  # 바로 분석 시작 플래그
     st.rerun()
 
 

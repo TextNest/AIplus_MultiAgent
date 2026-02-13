@@ -14,8 +14,10 @@ from pptx.util import Inches, Pt
 from xhtml2pdf import pisa
 
 from ..state import AgentState
-from ...core.llm_factory import LLMFactory, langfuse_session
 from ..prompt_engineering.prompts import REPORT_PROMPT
+from ...core.llm_factory import LLMFactory
+from ...core.observe import langfuse_session
+
 
 def generate_report(state: AgentState) -> AgentState:
     """
@@ -83,7 +85,6 @@ def generate_report(state: AgentState) -> AgentState:
             "final_report": final_output,
             "steps_log": [log_message]
         }
-
     except Exception as e:
         import traceback
         traceback.print_exc()

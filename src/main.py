@@ -39,6 +39,7 @@ def main():
     
     initial_state = {
         "file_path": "src/data/sample.csv",
+        "session_id": session_id,
         "steps_log": [],
         "analysis_results": [],
         "report_format": config.REPORT_FORMAT
