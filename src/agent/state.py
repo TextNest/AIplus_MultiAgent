@@ -38,3 +38,20 @@ class AgentState(TypedDict):
     
     # Retry counter for analysis loop (prevents infinite loops)
     retry_count: int
+
+
+class analyzeState(TypedDict):
+    user_query: str
+    user_choice: str
+    prepared_data: str
+    code: str
+    result_summary: str
+    result_img_path: str
+    feed_back: str
+    now_log: str
+    make_insight: int
+    roop_back: int
+    plan:str
+    df_summary:str
+    error_roop:int
+    is_approved:bool

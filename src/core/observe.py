@@ -58,63 +58,26 @@ def observe(name: Optional[str] = None):
 
 
 # ---------------------------------------------------------------------------
-# SessionAwareCallbackHandler (모든 provider에서 session_id 적용)
+# Langfuse CallbackHandler 생성
 # ---------------------------------------------------------------------------
-
-def _create_session_aware_handler_class():
-    """
-    Langfuse CallbackHandler를 상속하여, 직접 llm.invoke() 호출 시에도
-    session_id가 trace에 적용되도록 on_chat_model_start/on_llm_start를 보강합니다.
-
-    원인: 기본 CallbackHandler는 on_chain_start에서만 update_trace(session_id=...)를
-    호출합니다. ChatOpenAI/ChatAnthropic은 llm.invoke() 시 on_chain_start를 거치지
-    않아 session_id가 trace에 적용되지 않습니다.
-    """
-    from langfuse.langchain import CallbackHandler
-
-    class SessionAwareCallbackHandler(CallbackHandler):
-        def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, tags=None, metadata=None, **kwargs):
-            # 부모 클래스의 on_chat_model_start를 먼저 실행 (trace/generation 생성)
-            super().on_chat_model_start(
-                serialized, messages,
-                run_id=run_id, parent_run_id=parent_run_id,
-                tags=tags, metadata=metadata, **kwargs,
-            )
-            # 직접 LLM 호출(chain 없이)일 때만 session_id를 trace에 적용
-            if parent_run_id is None and metadata:
-                self._apply_trace_attributes_from_metadata(run_id, metadata)
-
-        def on_llm_start(self, serialized, prompts, *, run_id, parent_run_id=None, tags=None, metadata=None, **kwargs):
-            super().on_llm_start(
-                serialized, prompts,
-                run_id=run_id, parent_run_id=parent_run_id,
-                tags=tags, metadata=metadata, **kwargs,
-            )
-            if parent_run_id is None and metadata:
-                self._apply_trace_attributes_from_metadata(run_id, metadata)
-
-        def _apply_trace_attributes_from_metadata(self, run_id, metadata: Dict[str, Any]):
-            """metadata에서 langfuse_session_id 등을 추출하여 trace에 적용"""
-            attributes = self._parse_langfuse_trace_attributes_from_metadata(metadata)
-            if attributes and run_id in self.runs:
-                try:
-                    self.runs[run_id].update_trace(**attributes)
-                except Exception:
-                    pass  # Langfuse 연결 실패 등 — 무시하고 계속 진행
-
-    return SessionAwareCallbackHandler
-
+# Langfuse v3의 기본 CallbackHandler가 on_chain_start / __on_llm_action에서
+# _parse_langfuse_trace_attributes_from_metadata(metadata)를 통해
+# session_id, user_id, tags를 자동으로 trace에 적용합니다.
+#
+# 따라서 커스텀 서브클래스 없이 기본 CallbackHandler를 사용하고,
+# llm.invoke() 호출 시 config={"metadata": lf_metadata}를 전달하면 됩니다.
+# ---------------------------------------------------------------------------
 
 def create_callback_handler():
     """
-    Langfuse가 활성화되어 있으면 SessionAwareCallbackHandler를,
+    Langfuse가 활성화되어 있으면 기본 CallbackHandler를,
     아니면 None을 반환합니다.
     """
     if not is_langfuse_enabled():
         return None
     try:
-        HandlerClass = _create_session_aware_handler_class()
-        return HandlerClass()
+        from langfuse.langchain import CallbackHandler
+        return CallbackHandler()
     except Exception:
         return None
 
