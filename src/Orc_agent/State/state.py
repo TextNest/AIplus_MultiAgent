@@ -59,6 +59,11 @@ class AgentState(TypedDict):
     # Final Report
     final_report: Optional[str]
 
+    # 추가: 보고서 서브그래프용 필드
+    next_worker: Optional[str]
+    generated_formats: Annotated[List[str], merge_logs]
+    report_format: str  # 기본값 설정 필요 (사용자 입력 등)
+
     # Human Feedback
     human_feedback: Optional[str]
     
