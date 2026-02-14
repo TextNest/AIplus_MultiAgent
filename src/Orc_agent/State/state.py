@@ -16,7 +16,7 @@ class analyzeState(TypedDict):
     result_summary: str
     result_img_paths: List[str]
     feed_back: str
-    now_log: str
+    now_log: Annotated[List[str], merge_logs]
     roop_back: int
     plan:str
     df_summary:str
@@ -26,6 +26,24 @@ class analyzeState(TypedDict):
     user_query : str
 
 
+
+class ReportState(TypedDict):
+    """
+    State specifically for the Report Generation Subgraph.
+    Independent from AgentState to minimize coupling.
+    """
+    # Inputs from Main Agent
+    analysis_results: List[str]  # Text insights
+    figure_list: List[str]       # Image paths
+    file_path: str               # Data source path
+    clean_data: Optional[dict]   # Raw data sample (optional)
+    
+    # Internal State
+    final_report: Optional[str]  # Markdown content
+    report_format: List[str]     # Requested formats (pdf, html, pptx)
+    generated_formats: Annotated[List[str], "merge_logs"] # Track generated formats
+    steps_log: Annotated[List[str], "merge_logs"]
+    next_worker: str             # Control flow
 
 class DocumentState(TypedDict):
     file_path:str
@@ -52,6 +70,7 @@ class AgentState(TypedDict):
     
     # Analysis results (logs, figures, summary text)
     analysis_results: Optional[dict]
+    figure_list: Optional[List[str]]
     
     # Evaluation feedback (if analysis is insufficient)
     evaluation_feedback: Optional[str]
@@ -67,3 +86,5 @@ class AgentState(TypedDict):
     
     # Retry counter for analysis loop (prevents infinite loops)
     retry_count: int
+
+    feed_back:str

@@ -7,8 +7,7 @@ from ...core.df_summary import get_df_summary
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
-class MakeCodeOutput(BaseModel):
-    code:str= Field(description="실행 가능한 파이썬 분석 코드. 설명이나 사족은 절대 포함하지 마세요.")
+
 from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session
 from langchain_core.messages import HumanMessage
@@ -16,10 +15,14 @@ import base64
 import os
 from langchain_experimental.utilities import PythonREPL
 from ...core.observe import langfuse_session, observe
-
+import  matplotlib
+matplotlib.use('Agg')
 def get_python_repl():
     return PythonREPL()
+repl = get_python_repl()
 
+class MakeCodeOutput(BaseModel):
+    code:str= Field(description="실행 가능한 파이썬 분석 코드. 설명이나 사족은 절대 포함하지 마세요.")
 
 ## INPUT : "preprocessing_data": 전처리 데이터 파일 경로(안전 제일 주의) , "user_query":사용자 질문
 
@@ -42,7 +45,7 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
     - 어떤 시각화(막대그래프, 선그래프 등)가 필요한가?
     - 단계별 분석 순서를 나열하세요.
     *주의: 파이썬 코드는 작성하지 말고 오직 '계획'만 작성하세요.*
-    너무 많이 만들지말고 3개정도만 만들어
+    이미지 파일은 최대 3개만 만들 수 있도록 계획을 구축하세요. 다만 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다.
     """
     llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
         
@@ -88,6 +91,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     - 반드시 절대경로를 사용하여 저장하세요: plt.savefig(r'{img_dir}/figure_{state.get("roop_back", 0)}_n.png')
     - 한글 폰트 깨짐을 방지하기 위해 'koreanize_matplotlib' 라이브러리가 설치되어 있다고 가정하고 import하세요. 또는 폰트 설정을 직접 하세요.
     
+    - 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다
     - pandas, matplotlib, seaborn 라이브러리를 사용하세요.
     """
     
@@ -119,14 +123,14 @@ def run_code(state:analyzeState)->analyzeState:
         os.remove(f)
 
     full_code = code 
-    repl = get_python_repl()
+    
     try:
         result = repl.run(full_code)
         
         # PythonREPL은 예외를 발생시키지 않고 결과 문자열에 에러 메시지를 포함할 수 있음
         if "Traceback" in result or "Error" in result:
              return {
-                "now_log": result, 
+                "now_log": [result], 
                 "error_roop": state.get("error_roop",0) + 1
             }
         
@@ -139,7 +143,7 @@ def run_code(state:analyzeState)->analyzeState:
             "now_log": str(e), 
             "error_roop": state.get("error_roop",0)  + 1
         }
-    
+@observe(name="Eval")    
 def evaluation_code(state: analyzeState,config:RunnableConfig):
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
@@ -189,7 +193,7 @@ def router_next_step(state: analyzeState):
     elif choice == "추가":
         return "Create",{"roop_back": state.get("roop_back",0) +1}
     elif choice == "완료":
-        return "End"
+        return "END"
 
     else:
         pass
@@ -274,7 +278,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
         print(f"Structured Output Failed: {e}. Fallback to text.")
         llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
         with langfuse_session(session_id=s_id, user_id=u_id):
-            plain_response = llm.invoke([msg], config={'callbacks': fallback_callbacks})
+            plain_response = llm.invoke([msg], config={'callbacks': callbacks})
             
         final_insight = {
             "overall": {

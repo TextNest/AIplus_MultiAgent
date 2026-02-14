@@ -4,7 +4,7 @@ from ...State.state import analyzeState
 from ...Node.sub_node import analyze_data
 from langgraph.graph import START
 
-def analyze_data_graph():
+def analyze_data_graph(CheckPoint=None):
 
     analyze_workflow = StateGraph(analyzeState)
     analyze_workflow.add_node("Plan", analyze_data.plan_analysis_code)
@@ -42,5 +42,5 @@ def analyze_data_graph():
             "END":END
         }
     )
-    analyze_app = analyze_workflow.compile(checkpointer=MemorySaver(),interrupt_before=["Wait"])
+    analyze_app = analyze_workflow.compile(checkpointer=CheckPoint,interrupt_before=["Wait"])
     return analyze_app

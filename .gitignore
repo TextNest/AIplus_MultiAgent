@@ -211,3 +211,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+*.png
+*.pdf
+*.html  
+test/test_repro_hitl.py
+test/test_subgraph_direct.py
+test/debug_subgraph.py
