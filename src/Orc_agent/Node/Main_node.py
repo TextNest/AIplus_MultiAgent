@@ -70,7 +70,7 @@ def analysis(sub_app):
             sub_input = {
                 "preprocessing_data": state["file_path"],
                 "user_query": state["user_query"],
-                "feed_back": state.get("feed_back")
+                "feed_back": [state.get("feed_back","")] if state.get("feed_back") else []
             }
             
             for chunk in sub_app.stream(sub_input, config=sub_config, stream_mode="values"):

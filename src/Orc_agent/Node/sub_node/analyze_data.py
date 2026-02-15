@@ -13,18 +13,16 @@ from ...core.observe import langfuse_session
 from langchain_core.messages import HumanMessage
 import base64
 import os
-from langchain_experimental.utilities import PythonREPL
+
 from ...core.observe import langfuse_session, observe
 import  matplotlib
-matplotlib.use('Agg')
-def get_python_repl():
-    return PythonREPL()
-repl = get_python_repl()
+from src.Orc_agent.core.logger import logger
+from src.Orc_agent.core.executor import executor_instance
 
 class MakeCodeOutput(BaseModel):
     code:str= Field(description="실행 가능한 파이썬 분석 코드. 설명이나 사족은 절대 포함하지 마세요.")
-
-## INPUT : "preprocessing_data": 전처리 데이터 파일 경로(안전 제일 주의) , "user_query":사용자 질문
+    
+## INPUT : "preprocessing_data": 전처리 데이터 파일 경로(안전 제일 주의) , "user_query":사용자 질문,"feed_back":피드백
 
 @observe(name="Plan")
 def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeState:
@@ -35,11 +33,11 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
     df_summary = get_df_summary(df)
     prompt =  f"""
     당신은 마케팅 데이터 전략가입니다. 제공된 데이터프레임의 요약 정보를 바탕으로 사용자의 질문에 답하기 위한 최적의 분석 시나리오를 설계하고 코드를 작성하세요.
-
+    
  
     [데이터 정보]: {df_summary}
     [사용자 질문]: {state['user_query']}
-    
+    [피드백]: {state['feed_back']}
     위 데이터를 바탕으로 분석 계획을 세우세요. 
     - 어떤 KPI(ROAS, CTR 등)를 계산할 것인가?
     - 어떤 시각화(막대그래프, 선그래프 등)가 필요한가?
@@ -59,12 +57,12 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
 def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
-    llm, callbacks = LLMFactory.create('anthropic', 'claude-sonnet-4-5-20250929')
+    llm, callbacks = LLMFactory.create('openai', 'gpt-5.2')
         
     if state.get("feed_back",None):
-        text = f"수정사항: {state['feed_back']}"
+        text = f"수정사항: {state['feed_back']} 해당 수정사항을 반영하여 코드를 수정하세요"
     elif state.get("now_log",None):
-        text = f"오류 및 수정사항 :{state['now_log']}"
+        text = f"오류 및 수정사항 :{state['now_log']} 해당 오류가 발생 하지 않도록 수정을 진행하세요"
     else:
         text = ""
     file_path_raw = state.get("preprocessing_data", "")
@@ -83,6 +81,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     위 분석 계획을 확인하고 실행하기 위한 파이썬 코드를 작성하세요. 
     
     [필수]
+    - 변수명 앞에 _df 이렇게 작성하지마세요 추가적인 df가 필요하다면 copy1_df,copy2_df ... 이렇게 작성하세요 절대로 변수명 앞에 _ 사용하지 마세요.
     - 코드 시작 부분에서 반드시 데이터를 로드하세요: df = pd.read_csv(r'{file_path}') 
     - 설명이나 마크다운(```python ... ```) 없이 오직 파이썬 코드만 출력하세요. 
     - print 구문 사용 하지 마세요
@@ -92,7 +91,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     - 한글 폰트 깨짐을 방지하기 위해 'koreanize_matplotlib' 라이브러리가 설치되어 있다고 가정하고 import하세요. 또는 폰트 설정을 직접 하세요.
     
     - 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다
-    - pandas, matplotlib, seaborn 라이브러리를 사용하세요.
+    - numpy,pandas, matplotlib, seaborn ,koreanize_matplotlib 라이브러리를 사용하세요.
     """
     
     try:
@@ -100,7 +99,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
             response = structured_llm.invoke(prompt, config={'callbacks': callbacks})
         code = response.code
     except Exception as e:
-        return {"now_log": f"Code Generation Failed: {str(e)}", "error_roop": state.get("error_roop", 0) + 1}
+        return {"now_log": [f"Code Generation Failed: {str(e)}"], "error_roop": state.get("error_roop", 0) + 1}
         
     return {"code": code}
 
@@ -117,17 +116,44 @@ def run_code(state:analyzeState)->analyzeState:
     img_dir = f"{current_dir}/img"
     if not os.path.exists(img_dir):
         os.makedirs(img_dir)
-        
     target_pattern = f"{img_dir}/figure_{roop}_*.png"
     for f in glob.glob(target_pattern):
         os.remove(f)
+    # [Safety] 코드 주입 및 로깅
+    font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
+    
+    header = f"""
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
 
-    full_code = code 
+# 폰트 설정 (Detected: {font_name})
+plt.rcParams['font.family'] = '{font_name}'
+plt.rcParams['axes.unicode_minus'] = False
+
+# Seaborn 설정 (폰트 유지)
+try:
+    sns.set(font='{font_name}', rc={{"axes.unicode_minus":False}}, style='whitegrid')
+except:
+    pass
+"""
+    full_code =header+"\n"+code
+    
+    # ✅ 실제로 실행되는 코드 확인
+    logger.info("=" * 50)
+    logger.info(f"실행할 코드 (Executor):")
+    logger.info('\n'.join(full_code.split('\n')[:20]))
+    logger.info("=" * 50)
     
     try:
-        result = repl.run(full_code)
+        # [NEW] Persistent Executor 사용
+        result = executor_instance.run(full_code)
         
-        # PythonREPL은 예외를 발생시키지 않고 결과 문자열에 에러 메시지를 포함할 수 있음
+        logger.info(f"실행 결과: {result[:500]}")
+        
+        # Traceback이 포함되어 있으면 에러로 간주
         if "Traceback" in result or "Error" in result:
              return {
                 "now_log": [result], 
@@ -140,7 +166,7 @@ def run_code(state:analyzeState)->analyzeState:
         return {"result_summary": result, "result_img_paths": img_paths,"now_log":None}
     except Exception as e:
         return {
-            "now_log": str(e), 
+            "now_log": [str(e)], 
             "error_roop": state.get("error_roop",0)  + 1
         }
 @observe(name="Eval")    
@@ -164,7 +190,7 @@ def evaluation_code(state: analyzeState,config:RunnableConfig):
     if "APPROVE" in response.content:
         return {"is_approved": True}
     else:
-        return {"is_approved": False, "now_log": response.content}
+        return {"is_approved": False, "now_log": [response.content]}
 
 
 def route_wait_node(state: analyzeState):

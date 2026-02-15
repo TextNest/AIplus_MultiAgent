@@ -15,7 +15,7 @@ class analyzeState(TypedDict):
     code: str
     result_summary: str
     result_img_paths: List[str]
-    feed_back: str
+    feed_back: Annotated[List[str], merge_logs]
     now_log: Annotated[List[str], merge_logs]
     roop_back: int
     plan:str

@@ -59,7 +59,7 @@ def main():
             logger.info(">>> 서브 에이전트 상태 업데이트 중...")
             analyze_app.update_state(sub_config, {
                 "user_choice": input_choice,
-                "feed_back": input_feedback
+                "feed_back": [input_feedback]
             })
             
 

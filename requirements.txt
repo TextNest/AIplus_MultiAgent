@@ -6,6 +6,7 @@ websockets             # 실시간 채팅 및 HITL 신호 전송용
 
 # --- 웹 UI ---
 streamlit              # 대화형 데이터 분석 웹앱
+graphviz               # 그래프 시각화
 
 # --- AI 및 에이전트 오케스트레이션 ---
 langgraph              # 멀티 에이전트 상태 관리 및 HITL(중단/재개) 제어
