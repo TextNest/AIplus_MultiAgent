@@ -26,6 +26,10 @@ class MakeCodeOutput(BaseModel):
 
 @observe(name="Plan")
 def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeState:
+    if state.get("user_choice")=="추가":
+        roop_back = state.get("roop_back",0) +1
+    else:
+        roop_back = 0
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
     file_path = state.get("preprocessing_data","")
@@ -51,7 +55,7 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
         response = llm.invoke(prompt, config={'callbacks': callbacks})
 
     plan = response.content
-    return {"plan":plan , "df_summary":df_summary}
+    return {"plan":plan , "df_summary":df_summary,"roop_back":roop_back,"error_roop": 0}
 
 @observe(name="Make")
 def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
@@ -91,6 +95,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     - 한글 폰트 깨짐을 방지하기 위해 'koreanize_matplotlib' 라이브러리가 설치되어 있다고 가정하고 import하세요. 또는 폰트 설정을 직접 하세요.
     
     - 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다
+    - csv파일은 생성하지마세요.
     - numpy,pandas, matplotlib, seaborn ,koreanize_matplotlib 라이브러리를 사용하세요.
     """
     
@@ -98,6 +103,72 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
         with langfuse_session(session_id=s_id, user_id=u_id):
             response = structured_llm.invoke(prompt, config={'callbacks': callbacks})
         code = response.code
+        font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
+
+        header = f"""
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import platform
+import matplotlib.font_manager as fm
+from matplotlib import font_manager
+
+# 1. 시스템 폰트 찾기 (실제 설치된 폰트 확인)
+def get_korean_font():
+    font_list = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
+    
+    # 우선순위별 한글 폰트
+    preferred_fonts = [
+        'Malgun Gothic', 'NanumGothic', 'NanumBarunGothic', 
+        'AppleGothic', 'Apple SD Gothic Neo',
+        'Noto Sans KR', 'Noto Sans CJK KR',
+        'DejaVu Sans'  # fallback
+    ]
+    
+    for pref_font in preferred_fonts:
+        for font_path in font_list:
+            font_name = fm.FontProperties(fname=font_path).get_name()
+            if pref_font.lower() in font_name.lower():
+                return pref_font
+    
+    # 아무 한글 폰트나 찾기
+    for font_path in font_list:
+        font_name = fm.FontProperties(fname=font_path).get_name()
+        if any(keyword in font_name.lower() for keyword in ['gothic', 'nanum', 'malgun', 'apple']):
+            return font_name
+    
+    return 'DejaVu Sans'  # 최종 fallback
+
+korean_font = get_korean_font()
+
+# 2. Matplotlib 전역 설정 (강제)
+plt.rcParams.update({{
+    'font.family': korean_font,
+    'font.sans-serif': [korean_font, 'DejaVu Sans'],
+    'axes.unicode_minus': False,
+    'figure.autolayout': True
+}})
+
+# 3. Seaborn 설정 (폰트 설정 후에)
+try:
+    sns.set_style("whitegrid")
+    sns.set_context("notebook")
+    # Seaborn이 폰트를 덮어쓰지 않도록 재설정
+    sns.set(font=korean_font, rc={{'font.family': korean_font}})
+except:
+    pass
+
+# 4. 폰트 캐시 무효화 (필요시)
+try:
+    fm._rebuild()
+except:
+    pass
+
+print(f"사용 중인 한글 폰트: {{korean_font}}")
+"""
+        code = header + "\n" + code
     except Exception as e:
         return {"now_log": [f"Code Generation Failed: {str(e)}"], "error_roop": state.get("error_roop", 0) + 1}
         
@@ -117,39 +188,16 @@ def run_code(state:analyzeState)->analyzeState:
     if not os.path.exists(img_dir):
         os.makedirs(img_dir)
     target_pattern = f"{img_dir}/figure_{roop}_*.png"
+    target_csv = f"{img_dir}/*.csv"
     for f in glob.glob(target_pattern):
         os.remove(f)
+    for f in glob.glob(target_csv):
+        os.remove(f)
     # [Safety] 코드 주입 및 로깅
-    font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
-    
-    header = f"""
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-
-# 폰트 설정 (Detected: {font_name})
-plt.rcParams['font.family'] = '{font_name}'
-plt.rcParams['axes.unicode_minus'] = False
-
-# Seaborn 설정 (폰트 유지)
-try:
-    sns.set(font='{font_name}', rc={{"axes.unicode_minus":False}}, style='whitegrid')
-except:
-    pass
-"""
-    full_code =header+"\n"+code
-    
-    # ✅ 실제로 실행되는 코드 확인
-    logger.info("=" * 50)
-    logger.info(f"실행할 코드 (Executor):")
-    logger.info('\n'.join(full_code.split('\n')[:20]))
-    logger.info("=" * 50)
-    
+   
     try:
         # [NEW] Persistent Executor 사용
-        result = executor_instance.run(full_code)
+        result = executor_instance.run(code)
         
         logger.info(f"실행 결과: {result[:500]}")
         
@@ -163,7 +211,7 @@ except:
         # 생성된 이미지 파일 확인
         img_paths = sorted(glob.glob(target_pattern))
         
-        return {"result_summary": result, "result_img_paths": img_paths,"now_log":None}
+        return {"result_summary": result, "result_img_paths": img_paths,"now_log":None,"error_roop": 0}
     except Exception as e:
         return {
             "now_log": [str(e)], 
@@ -217,7 +265,7 @@ def router_next_step(state: analyzeState):
     if choice == "수정":
         return "Make"
     elif choice == "추가":
-        return "Create",{"roop_back": state.get("roop_back",0) +1}
+        return "Create"
     elif choice == "완료":
         return "END"
 
@@ -239,11 +287,22 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
 
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
+    roop = str(state.get("roop_back", 0))
+
+    # 기존에 생성된 이미지 파일이 있다면 삭제 (초기화)
+    import glob
+    import os
+    img_paths = []
+    current_dir = os.getcwd().replace("\\", "/")
+    img_dir = f"{current_dir}/img"
     
-    img_paths = state.get("result_img_paths", [])
-    df_summary = state.get("df_summary", "")
     plan = state.get("plan", "")
+    df_summary = state.get("df_summary", "")
     
+    # [Fix] 현재 루프에서 생성된 이미지만 로드 (TypeError 해결 & 증분 분석)
+    img_paths = sorted(glob.glob(f"{img_dir}/figure_{roop}_*.png"))
+    new_img_paths = img_paths
+
     # 1. 메시지 구성
     messages_content = []
     messages_content.append({"type": "text", "text": f"""
@@ -252,15 +311,17 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
     [분석 배경]
     - 계획: {plan}
     - 데이터 요약 정보: {df_summary}
-    - 생성된 이미지 목록: {img_paths}
     
-    위 시각화 결과(이미지)와 분석 결과를 바탕으로 다음 두 가지를 수행하세요.
-    1. **개별 이미지 분석**: 각 그래프가 보여주는 구체적인 수치와 패턴을 설명하세요.
-    2. **종합 인사이트**: 모든 결과를 종합하여 'Why'와 'Action Item'을 포함한 결론을 도출하세요.
+    [새로운 시각화 이미지 목록]:
+    {[os.path.basename(p) for p in new_img_paths]}
+    
+    위 정보와 새롭게 제공되는 이미지를 바탕으로 다음을 수행하세요.
+    1. **새로운 개별 이미지 분석**: 새로 추가된 이미지({[os.path.basename(p) for p in new_img_paths]})에 대해서만 구체적인 수치와 패턴을 분석하세요.
+    2. **이번 회차({roop}) 종합 인사이트**: **이번에 새로 추가된 시각화 결과**가 전체 분석에 어떤 의미를 주는지 설명하는 **독립적인 종합 결과**를 작성하세요.
     """})
     
     # 2. 이미지 첨부
-    for img_path in img_paths:
+    for img_path in new_img_paths:
         if os.path.exists(img_path):
             with open(img_path, "rb") as image_file:
                 image_data = base64.b64encode(image_file.read()).decode("utf-8")
@@ -271,7 +332,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
                 "image_url": {"url": f"data:image/png;base64,{image_data}"}
             })
             
-    if not img_paths:
+    if not new_img_paths:
          messages_content.append({"type": "text", "text": "(생성된 이미지가 없습니다. 텍스트 결과 및 데이터 요약을 바탕으로 분석해 주세요.)"})
 
     msg = HumanMessage(content=messages_content)
@@ -285,8 +346,11 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
             
         filename_map = {os.path.basename(p): p for p in img_paths}
         
+        # [Fix] Overall Insight를 병합하지 않고 회차별로 분리하여 저장
+        overall_key = f"overall_{roop}"
+        
         final_insight = {
-            "overall": {
+            overall_key: {
                 "insight": response.overall_insight,
                 "img_path": None
             }
@@ -306,8 +370,9 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
         with langfuse_session(session_id=s_id, user_id=u_id):
             plain_response = llm.invoke([msg], config={'callbacks': callbacks})
             
+        overall_key = f"overall_{roop}"
         final_insight = {
-            "overall": {
+            overall_key: {
                 "insight": plain_response.content,
                 "img_path": None
             }

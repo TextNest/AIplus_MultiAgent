@@ -9,20 +9,27 @@ def merge_logs(left: List[str], right: List[str]) -> List[str]:
         return right
     return left + right
 
+def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
+    if right is None:
+        return left
+    if left is None:
+        return right
+    return {**left, **right}
+
 class analyzeState(TypedDict):
     user_choice: str
     preprocessing_data : str
     code: str
     result_summary: str
-    result_img_paths: List[str]
+    result_img_paths: Annotated[List[str], merge_logs]
     feed_back: Annotated[List[str], merge_logs]
     now_log: Annotated[List[str], merge_logs]
     roop_back: int
     plan:str
     df_summary:str
-    error_roop:int
+    error_roop: Annotated[int, operator.add]
     is_approved:bool
-    final_insight: Dict[str, Any]
+    final_insight: Annotated[Dict[str, Any], merge_dicts]
     user_query : str
 
 
@@ -41,8 +48,8 @@ class ReportState(TypedDict):
     # Internal State
     final_report: Optional[str]  # Markdown content
     report_format: List[str]     # Requested formats (pdf, html, pptx)
-    generated_formats: Annotated[List[str], "merge_logs"] # Track generated formats
-    steps_log: Annotated[List[str], "merge_logs"]
+    generated_formats: Annotated[List[str], merge_logs] # Track generated formats
+    steps_log: Annotated[List[str], merge_logs]
     next_worker: str             # Control flow
 
 class DocumentState(TypedDict):
@@ -76,7 +83,9 @@ class AgentState(TypedDict):
     evaluation_feedback: Optional[str]
     
     # Final Report
+    report_type: Optional[List[str]]
     final_report: Optional[str]
+
 
     # Human Feedback
     human_feedback: Optional[str]

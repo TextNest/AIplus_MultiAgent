@@ -24,14 +24,14 @@ def get_base_graph():
     dot.node('Start', 'Start', shape='circle', style='filled', fillcolor='#E0E0E0', width='0.5', height='0.5', fontsize='9')
     dot.node('End', 'End', shape='circle', style='filled', fillcolor='#E0E0E0', width='0.5', height='0.5', fontsize='9')
     
-    dot.node('File_type', '📂 File Type Check')
-    dot.node('File_analysis', '📄 Document Analysis')
+    dot.node('File_type', '📂 파일 타입 확인')
+    dot.node('File_analysis', '📄 문서 분석')
     
     # Tabular processing nodes
-    dot.node('Preprocessing', '🧹 Pre-processing')
-    dot.node('Analysis', '🤖 Analysis Agent')
-    dot.node('Final_report', '📝 Generate Report')
-    dot.node('Wait', '👤 Human Review', shape='diamond', style='filled', fillcolor='#FFE0B2', height='0.6', fontsize='10')
+    dot.node('Preprocessing', '🧹 전처리')
+    dot.node('Analysis', '🤖 데이터 분석 에이전트')
+    dot.node('Final_report', '📝 리포트 생성 에이전트')
+    dot.node('Wait', '👤 피드백 대기', shape='diamond', style='filled', fillcolor='#FFE0B2', height='0.6', fontsize='10')
 
     # === 엣지 정의 (흐름) ===
     
@@ -50,8 +50,9 @@ def get_base_graph():
     dot.edge('Final_report', 'Wait')
     
     # 4. Human Review Loop & End
-    dot.edge('Wait', 'End', label='Approve')
-    dot.edge('Wait', 'Analysis', label='Reject', color='red', style='dashed')
+    dot.edge('Wait', 'End', label='APPROVE')
+
+    dot.edge('Wait', 'Analysis', label='REJECT', color='red', style='dashed', constraint='true', tailport='e', headport='e')
     
     # 5. Document Flow End
     dot.edge('File_analysis', 'End')
@@ -94,7 +95,7 @@ def generate_highlighted_graph(current_node: str, sub_status: str = None):
         # Analysis 노드인 경우 서브 상태 표시 (움직이는 느낌을 주기 위해)
         if current_node == "Analysis" and sub_status:
             # 라벨 변경: "Analysis Agent\n(Running: Plan)"
-            new_label = f"🤖 Analysis Agent\n(Running: {sub_status})"
+            new_label = f"🤖 데이터 분석 에이전트\n(진행중: {sub_status})"
             dot.node('Analysis', label=new_label, color='#FF4B4B', penwidth='3.0', fillcolor='#FFF9C4')
     
     return dot

@@ -98,14 +98,17 @@ def main():
             if uploaded_file:
                 # 파일 저장 및 세션 업데이트
                 if st.session_state.uploaded_file_path is None or uploaded_file.name != os.path.basename(st.session_state.uploaded_file_path):
-                    with io.BytesIO(uploaded_file.getvalue()) as f:
-                        file_path = f"temp_{uploaded_file.name}" # 간단히 로컬에 저장 (실제 서비스에선 tempfile 사용 권장)
-                        with open(file_path, "wb") as out:
-                            out.write(f.read())
-                        st.session_state.uploaded_file_path = file_path
-                        # 미리보기 데이터 로드
-                        df = pd.read_csv(file_path)
-                        st.session_state.df_preview = df
+                    file_path = f"temp_{uploaded_file.name}" 
+    
+     
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    st.session_state.uploaded_file_path = file_path
+                    
+                    # 미리보기 데이터 로드
+                    df = pd.read_csv(file_path)
+                    st.session_state.df_preview = df
             
             report_format = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
             
@@ -151,6 +154,10 @@ def main():
             with log_container.container():
                 for log in st.session_state.logs:
                     st.text(log)
+        
+        # 5. [NEW] 보고서 다운로드 (좌측 컬럼)
+        if st.session_state.final_report:
+            render_download_buttons()
 
     # --- [Right Column] 그래프 시각화 ---
     with col_right:
@@ -191,7 +198,7 @@ def main():
 
     # === Auto-Run Logic ===
     if st.session_state.is_running:
-        run_engine(log_container, graph_placeholder, user_query)
+        run_engine(log_container, graph_placeholder, user_query, report_format)
 
 
 def render_markdown_with_images(markdown_text):
@@ -226,7 +233,7 @@ def render_markdown_with_images(markdown_text):
 
 
 # === 7. 실행 엔진 ===
-def run_engine(log_container, graph_placeholder, user_query):
+def run_engine(log_container, graph_placeholder, user_query, report_format):
     graph, sub_apps = get_graph()
     analyze_app = sub_apps['analyze']
     
@@ -247,7 +254,8 @@ def run_engine(log_container, graph_placeholder, user_query):
         # 처음 시작
         initial_state = {
             "file_path": st.session_state.uploaded_file_path,
-            "user_query": user_query
+            "user_query": user_query,
+            "report_type": report_format
         }
         input_data = initial_state
     else:
@@ -301,6 +309,9 @@ def run_engine(log_container, graph_placeholder, user_query):
         st.session_state.is_running = False
         st.session_state.hitl_active = False
         st.balloons()
+        
+        # [NEW] 다운로드 버튼 표시 (Rerun to show buttons)
+        st.rerun()
         
     except Exception as e:
         error_msg = str(e)
@@ -392,15 +403,15 @@ def render_visualization_tab():
     texts = []
     items = []
     
-    # (1) Overall Insight
-    if "overall" in results:
-        overall_text = results["overall"].get("insight", "")
-        if overall_text:
-            items.append({
-                "type": "overall",
-                "title": "📊 종합 인사이트 (Overall Insight)",
-                "text": overall_text
-            })
+    # # (1) Overall Insight
+    # if "overall" in results:
+    #     overall_text = results["overall"].get("insight", "")
+    #     if overall_text:
+    #         items.append({
+    #             "type": "overall",
+    #             "title": "📊 종합 인사이트 (Overall Insight)",
+    #             "text": overall_text
+    #         })
             
     # (2) Image + Insight Pairs
     # figures 리스트를 순회하며 매칭되는 insight를 찾음
@@ -417,19 +428,19 @@ def render_visualization_tab():
         insight_data = results.get(file_name, {})
         insight_text = insight_data.get("insight", "") if isinstance(insight_data, dict) else ""
         
-        if file_name in results:
-            matched_keys.add(file_name)
+        # if file_name in results:
+        #     matched_keys.add(file_name)
             
         imgs.append(fig_path)
         
     # (3) Orphan Insights (이미지 없이 텍스트만 있는 경우)
-    for key, val in results.items():
-        if key not in matched_keys:
-            txt = val.get("insight", "") if isinstance(val, dict) else str(val)
-            if txt:
-                # 짝이 안 맞는 텍스트는 이미지 없이 추가하거나, 별도 리스트로 관리
-                # 여기서는 items에 직접 추가하던 기존 로직을 유지하거나 리스트에 추가
-                pass # text 리스트와 싱크가 안 맞으므로 별도 처리 필요
+    # for key, val in results.items():
+    #     if key not in matched_keys:
+    #         txt = val.get("insight", "") if isinstance(val, dict) else str(val)
+    #         if txt:
+    #             # 짝이 안 맞는 텍스트는 이미지 없이 추가하거나, 별도 리스트로 관리
+    #             # 여기서는 items에 직접 추가하던 기존 로직을 유지하거나 리스트에 추가
+    #             pass # text 리스트와 싱크가 안 맞으므로 별도 처리 필요
 
     # zip으로 묶어서 추가 (이미지와 텍스트 순서가 보장되어야 함 - 현재 로직은 단순 순서 매칭이라 위험할 수 있음)
     # 하지만 사용자 의도대로 리스트를 합침
@@ -498,6 +509,49 @@ def render_visualization_tab():
             st.info(current_item["text"])
         
     st.caption(f"Page {st.session_state.viz_page + 1} / {total_pages}")
+
+
+def render_download_buttons():
+    """
+    생성된 보고서 파일(PDF, HTML, PPTX, Markdown) 다운로드 버튼 렌더링
+    """
+    st.divider()
+    st.subheader("📥 보고서 다운로드")
+    
+    # 1. 파일 경로 설정 (output 디렉토리 기준)
+    output_dir = "output"
+    files = {
+        "PDF 보고서": "report.pdf",
+        "HTML 보고서": "report.html",
+        "PPTX 보고서": "report.pptx"
+    }
+    
+    # 좌측 컬럼용 수직 레이아웃
+    
+    # (1) Markdown 다운로드 (항상 가능)
+    if st.session_state.final_report:
+        st.download_button(
+            label="📄 Markdown 다운로드",
+            data=st.session_state.final_report,
+            file_name="report.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+        
+    # (2) 생성된 파일 다운로드
+    for label, filename in files.items():
+        filepath = os.path.join(output_dir, filename)
+        if os.path.exists(filepath):
+            with open(filepath, "rb") as f:
+                file_data = f.read()
+                
+            st.download_button(
+                label=f"📑 {label}",
+                data=file_data,
+                file_name=filename,
+                mime="application/octet-stream",
+                use_container_width=True
+            )
 
 
 if __name__ == "__main__":

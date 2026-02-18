@@ -12,6 +12,8 @@ from ...core.observe import langfuse_session, observe
 from src.agent.prompt_engineering.prompts import REPORT_PROMPT
 from ...State.state import ReportState
 
+from src.Orc_agent.core.logger import logger
+
 # Ensure output directory exists
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -25,6 +27,8 @@ def report_supervisor(state: ReportState) -> ReportState:
     """
     final_report = state.get("final_report")
     report_format = state.get("report_format", ["markdown"])
+    logger.info(f"현재 등록된 보고서 형식 : {report_format}")
+
     
     # Ensure report_format is a list of lowercase strings
     if isinstance(report_format, str):
@@ -135,42 +139,37 @@ def create_pdf(state: ReportState) -> ReportState:
         return {"steps_log": ["[Report] PDF Generation Skipped (No Content)"]}
         
     try:
+        import markdown
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        
         html_content = markdown.markdown(markdown_content)
         
-        import shutil
-        
         # 1. Font Source (Windows)
+        font_name = "MalgunGothic"
         system_font_path = r"C:/Windows/Fonts/malgun.ttf"
         
-        # 2. Destination (Project Output Dir)
-        # Copying font to local dir often resolves access/path issues in xhtml2pdf
-        local_font_path = os.path.join(OUTPUT_DIR, "malgun.ttf")
-        
+        # 2. Register Font via ReportLab directly
+        # This bypasses xhtml2pdf's internal font loading which can cause temp file issues
+        font_registered = False
         if os.path.exists(system_font_path):
-            if not os.path.exists(local_font_path):
-                try:
-                    shutil.copy(system_font_path, local_font_path)
-                except Exception as e:
-                    print(f"Font copy failed: {e}")
-                    local_font_path = system_font_path # Fallback to system path
-        else:
-             local_font_path = "arial.ttf" # Fallback
-
-        # 3. Use Relative Path for CSS (or absolute local path with forward slashes)
-        # xhtml2pdf handles local files best when they are relative to the working dir or absolute.
-        # We will use the absolute path of the COPIED file, with forward slashes.
-        font_url = local_font_path.replace("\\", "/")
+            try:
+                pdfmetrics.registerFont(TTFont(font_name, system_font_path))
+                font_registered = True
+            except Exception as e:
+                print(f"Font registration warning: {e}")
+        
+        if not font_registered:
+             # Fallback to a standard font if registration fails
+             font_name = "Helvetica" # standard PDF font
+             print("Using fallback font: Helvetica")
 
         styled_html = f"""
         <html>
         <head>
             <style>
-                @font-face {{
-                    font-family: 'MalgunGothic';
-                    src: url('{font_url}');
-                }}
                 body {{
-                    font-family: 'MalgunGothic', sans-serif;
+                    font-family: '{font_name}', sans-serif;
                 }}
                 img {{
                     max-width: 100%;
@@ -191,7 +190,8 @@ def create_pdf(state: ReportState) -> ReportState:
             raise Exception("PDF generation failed")
             
         return {
-            "steps_log": [f"[Report] Generated PDF report at {output_path}"]
+            "steps_log": [f"[Report] Generated PDF report at {output_path}"],
+            "generated_formats":["pdf"]
         }
     except Exception as e:
         return {"steps_log": [f"[Report] PDF Generation Error: {str(e)}"]}
@@ -214,7 +214,8 @@ def create_html(state: ReportState) -> ReportState:
             f.write(styled_html)
             
         return {
-            "steps_log": [f"[Report] Generated HTML report at {output_path}"]
+            "steps_log": [f"[Report] Generated HTML report at {output_path}"],
+            "generated_formats":["html"]
         }
     except Exception as e:
         return {"steps_log": [f"[Report] HTML Generation Error: {str(e)}"]}
@@ -267,7 +268,8 @@ def create_pptx(state: ReportState) -> ReportState:
         prs.save(output_path)
         
         return {
-            "steps_log": [f"[Report] Generated PowerPoint report at {output_path}"]
+            "steps_log": [f"[Report] Generated PowerPoint report at {output_path}"],
+            "generated_formats":["pptx"]
         }
     except Exception as e:
         return {"steps_log": [f"[Report] PPTX Generation Error: {str(e)}"]}

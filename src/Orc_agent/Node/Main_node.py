@@ -121,7 +121,7 @@ def final_report(sub_app):
             "analysis_results": insight_texts,
             "figure_list": state.get("figure_list", []),
             "file_path": state.get("file_path", ""),
-            "report_format": ["markdown","pdf"],
+            "report_format": state.get("report_type", ["markdown"]),
             "clean_data": state.get("clean_data")
         }
 
