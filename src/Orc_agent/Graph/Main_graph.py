@@ -16,6 +16,9 @@ def create_main_graph():
     main_workflow.add_node("Analysis",Main_node.analysis(analyze_app))
     main_workflow.add_node("Wait",Main_node.human_review_wait)
 
+    # 추가:
+    main_workflow.add_node("Determine_Format", Main_node.determine_format)
+
     # 기존:
     # main_workflow.add_node("Final_report",Main_node.final_report)#아직 추가 x
 
@@ -23,7 +26,12 @@ def create_main_graph():
     report_app = create_report_subgraph()
     main_workflow.add_node("generate_report", report_app) 
 
-    main_workflow.add_edge(START,"File_type")
+    # 기존:
+    # main_workflow.add_edge(START,"File_type")
+    
+    # 변경:
+    main_workflow.add_edge(START, "Determine_Format")
+    main_workflow.add_edge("Determine_Format", "File_type")    
     main_workflow.add_edge("File_analysis",END)
     main_workflow.add_edge("Preprocessing","Analysis")
     

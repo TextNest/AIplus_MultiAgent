@@ -34,20 +34,50 @@ def main():
     # 실행
     # stream 모드로 각 단계 진행 상황 출력
     try:
+
+        # for event in app.stream(initial_state, config=config_run):
+        #     for key, value in event.items():
+        #         print(f"\n--- [Node: {key}] ---")
+                
+        #         # 로그 출력
+        #         if "steps_log" in value and value["steps_log"]:
+        #             print(f"Log: {value['steps_log'][-1]}")
+                
+        #         # 수퍼바이저 결정 확인
+        #         if "next_worker" in value:
+        #             print(f"Supervisor Decision: {value['next_worker']}")
+                    
+        # print("\n>>> 시뮬레이션 완료: 성공적으로 모든 단계를 통과했습니다.")
+
+
+    # 1차 실행 (Wait 전까지)
         for event in app.stream(initial_state, config=config_run):
             for key, value in event.items():
                 print(f"\n--- [Node: {key}] ---")
-                
-                # 로그 출력
-                if "steps_log" in value and value["steps_log"]:
-                    print(f"Log: {value['steps_log'][-1]}")
+                # 로그 출력...
+        # 상태 확인
+        state = app.get_state(config_run)
+        if state.next:
+            print(f"\n>>> 현재 대기 중인 다음 노드: {state.next}")
+            
+        # Wait에 걸려있다면 승인 처리 후 재개
+        print("\n>>> [Simulation] 사용자 승인(APPROVE) 및 완료 처리")
+        app.update_state(config_run, {
+            "user_choice": "완료",
+            "human_feedback": "APPROVE" # 메인 그래프용
+        })
+        
+        # 2차 실행 (Wait 이후 ~ 끝까지)
+        for event in app.stream(None, config=config_run):
+            for key, value in event.items():
+                print(f"\n--- [Node: {key}] ---")
+                # 로그 출력...
                 
                 # 수퍼바이저 결정 확인
-                if "next_worker" in value:
+                if value is not None and "next_worker" in value:
                     print(f"Supervisor Decision: {value['next_worker']}")
-                    
-        print("\n>>> 시뮬레이션 완료: 성공적으로 모든 단계를 통과했습니다.")
-        
+        print("\n>>> 시뮬레이션 완료")
+
     except Exception as e:
         print(f"\n>>> 시뮬레이션 중단: 에러 발생\n{e}")
         import traceback

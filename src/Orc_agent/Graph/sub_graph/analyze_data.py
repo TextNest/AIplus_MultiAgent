@@ -39,8 +39,12 @@ def analyze_data_graph():
         {
             "Make":"Make",
             "Create":"Plan",
-            "END":END
+            "End":END
         }
     )
-    analyze_app = analyze_workflow.compile(checkpointer=MemorySaver(),interrupt_before=["Wait"])
+    # 기존:
+    # analyze_app = analyze_workflow.compile(checkpointer=MemorySaver(),interrupt_before=["Wait"])
+
+    # 테스트용:
+    analyze_app = analyze_workflow.compile(checkpointer=MemorySaver())
     return analyze_app

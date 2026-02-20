@@ -55,19 +55,36 @@ def human_review(sub_app):
         return{
         }
     return human_review_node
-def final_report(state: AgentState, config: RunnableConfig):
-    # 아직 구현 안 됨 (Pass)
-    return {"steps_log": ["Final report skipped (Not implemented yet)"]}
+# def final_report(state: AgentState, config: RunnableConfig):
+#     # 아직 구현 안 됨 (Pass)
+#     return {"steps_log": ["Final report skipped (Not implemented yet)"]}
 
-# def final_report(sub_app):
-#     def final_report_node(state: AgentState, config: RunnableConfig):
-#         sub_input ={
+def final_report(sub_app):
+    def final_report_node(state: AgentState, config: RunnableConfig):
+        sub_input ={
 
-#         }
-#         result = sub_app.invoke(sub_input,config=config)
-#         return{
-#         }
-#     return final_report_node
+        }
+        result = sub_app.invoke(sub_input,config=config)
+        return{
+        }
+    return final_report_node
+
+def determine_format(state: AgentState, config: RunnableConfig):
+    user_query = state.get("user_query", "").lower()
+    
+    # 기본값 설정
+    detected_format = "markdown"
+    
+    # 키워드 감지
+    if "pdf" in user_query:
+        detected_format = "pdf"
+    elif "html" in user_query:
+        detected_format = "html"
+    elif "ppt" in user_query or "pptx" in user_query:
+        detected_format = "pptx"
+        
+    # 상태 업데이트
+    return {"report_format": detected_format}
 
 
 def file_type(state:AgentState,config:RunnableConfig)->AgentState:
