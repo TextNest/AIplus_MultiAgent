@@ -7,8 +7,10 @@ Langfuse Observability 중앙 모듈
 """
 
 import os
+from copy import deepcopy
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional
+from langchain_core.runnables import RunnableConfig
 
 _observe_fn: Optional[Callable] = None
 
@@ -174,3 +176,52 @@ def langfuse_session(
     else:
         # Langfuse가 설정되지 않은 경우 빈 딕셔너리 반환
         yield langfuse_metadata
+
+
+def merge_runnable_config(
+    base: Optional[RunnableConfig],
+    *,
+    callbacks=None,
+    metadata: Optional[Dict[str, Any]] = None,
+    tags: Optional[List[str]] = None,
+) -> RunnableConfig:
+    cfg: RunnableConfig = deepcopy(base) if base else {}
+
+    if callbacks:
+        existing_callbacks = cfg.get("callbacks")
+        merged_callbacks = []
+        if isinstance(existing_callbacks, list):
+            merged_callbacks.extend(existing_callbacks)
+        elif existing_callbacks is not None:
+            merged_callbacks.append(existing_callbacks)
+
+        if isinstance(callbacks, list):
+            merged_callbacks.extend(callbacks)
+        else:
+            merged_callbacks.append(callbacks)
+        cfg["callbacks"] = merged_callbacks
+
+    if metadata:
+        existing_metadata = cfg.get("metadata")
+        if isinstance(existing_metadata, dict):
+            merged_metadata = dict(existing_metadata)
+            merged_metadata.update(metadata)
+            cfg["metadata"] = merged_metadata
+        else:
+            cfg["metadata"] = dict(metadata)
+
+    if tags:
+        existing_tags = cfg.get("tags")
+        merged_tags = []
+        if isinstance(existing_tags, list):
+            merged_tags.extend(existing_tags)
+        elif existing_tags is not None:
+            merged_tags.append(existing_tags)
+
+        if isinstance(tags, list):
+            merged_tags.extend(tags)
+        else:
+            merged_tags.append(tags)
+        cfg["tags"] = merged_tags
+
+    return cfg

@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
 
 from ...core.llm_factory import LLMFactory
-from ...core.observe import langfuse_session
+from ...core.observe import langfuse_session, merge_runnable_config
 from langchain_core.messages import HumanMessage
 import base64
 import os
 
-from ...core.observe import langfuse_session, observe
+from ...core.observe import observe
 import  matplotlib
 from src.Orc_agent.core.logger import logger
 from src.Orc_agent.core.executor import executor_instance
@@ -49,10 +49,15 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
     *주의: 파이썬 코드는 작성하지 말고 오직 '계획'만 작성하세요.*
     이미지 파일은 최대 3개만 만들 수 있도록 계획을 구축하세요. 다만 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다.
     """
-    llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
+    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
         
-    with langfuse_session(session_id=s_id, user_id=u_id):
-        response = llm.invoke(prompt, config={'callbacks': callbacks})
+    with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+        invoke_cfg = merge_runnable_config(
+            config,
+            callbacks=callbacks,
+            metadata=lf_metadata,
+        )
+        response = llm.invoke(prompt, config=invoke_cfg)
 
     plan = response.content
     return {"plan":plan , "df_summary":df_summary,"roop_back":roop_back,"error_roop": 0}
@@ -61,7 +66,7 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
 def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
-    llm, callbacks = LLMFactory.create('openai', 'gpt-5.2')
+    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
         
     if state.get("feed_back",None):
         text = f"수정사항: {state['feed_back']} 해당 수정사항을 반영하여 코드를 수정하세요"
@@ -76,7 +81,6 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
         file_path = ""
     current_dir = os.getcwd().replace("\\", "/") 
     img_dir = f"{current_dir}/img"
-    structured_llm = llm.with_structured_output(MakeCodeOutput)
     prompt = f"""
     분석 계획: {state['plan']}
     데이터 요약: {state['df_summary']}
@@ -100,9 +104,23 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     """
     
     try:
-        with langfuse_session(session_id=s_id, user_id=u_id):
-            response = structured_llm.invoke(prompt, config={'callbacks': callbacks})
-        code = response.code
+        with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+            invoke_cfg = merge_runnable_config(
+                config,
+                callbacks=callbacks,
+                metadata=lf_metadata,
+            )
+            response = llm.invoke(prompt, config=invoke_cfg)
+
+        code = response.content if hasattr(response, "content") else str(response)
+        if isinstance(code, list):
+            code = "".join([str(part) for part in code])
+
+        if "```" in code:
+            match = re.search(r"```(?:python)?\s*(.*?)```", code, re.DOTALL)
+            if match:
+                code = match.group(1).strip()
+
         font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
 
         header = f"""
@@ -230,10 +248,15 @@ def evaluation_code(state: analyzeState,config:RunnableConfig):
     결과가 타당하면 'APPROVE', 부족하거나 오류가 보이면 'REJECT'와 이유를 적으세요.
     지금은 테스트 상황이니 'APPROVE'를 반환해주세요.
     """
-    llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
+    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
         
-    with langfuse_session(session_id=s_id, user_id=u_id):
-        response = llm.invoke(prompt, config={'callbacks': callbacks})
+    with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+        invoke_cfg = merge_runnable_config(
+            config,
+            callbacks=callbacks,
+            metadata=lf_metadata,
+        )
+        response = llm.invoke(prompt, config=invoke_cfg)
     
     if "APPROVE" in response.content:
         return {"is_approved": True}
@@ -337,12 +360,17 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
 
     msg = HumanMessage(content=messages_content)
     
-    llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
+    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
     structured_llm = llm.with_structured_output(InsightOutput)
     
     try:
-        with langfuse_session(session_id=s_id, user_id=u_id):
-            response = structured_llm.invoke([msg], config={'callbacks': callbacks})
+        with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+            invoke_cfg = merge_runnable_config(
+                config,
+                callbacks=callbacks,
+                metadata=lf_metadata,
+            )
+            response = structured_llm.invoke([msg], config=invoke_cfg)
             
         filename_map = {os.path.basename(p): p for p in img_paths}
         
@@ -366,9 +394,14 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
                 
     except Exception as e:
         print(f"Structured Output Failed: {e}. Fallback to text.")
-        llm, callbacks = LLMFactory.create('openai', 'gpt-5-nano', temperature=0.3)
-        with langfuse_session(session_id=s_id, user_id=u_id):
-            plain_response = llm.invoke([msg], config={'callbacks': callbacks})
+        llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
+        with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+            invoke_cfg = merge_runnable_config(
+                config,
+                callbacks=callbacks,
+                metadata=lf_metadata,
+            )
+            plain_response = llm.invoke([msg], config=invoke_cfg)
             
         overall_key = f"overall_{roop}"
         final_insight = {

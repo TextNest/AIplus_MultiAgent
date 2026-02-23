@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ...State.state import DocumentState
 from ...core.llm_factory import LLMFactory
-from src.core.observe import observe, langfuse_session
+from ...core.observe import observe, langfuse_session, merge_runnable_config
 
 
 def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
@@ -34,8 +34,13 @@ def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
         ]
     )
 
-    with langfuse_session(session_id=session_id, tags=["document_agent", "ocr_fallback"]):
-        resp = llm.invoke([msg], config={"callbacks": callbacks})
+    with langfuse_session(session_id=session_id, tags=["document_agent", "ocr_fallback"]) as lf_metadata:
+        invoke_cfg = merge_runnable_config(
+            None,
+            callbacks=callbacks,
+            metadata=lf_metadata,
+        )
+        resp = llm.invoke([msg], config=invoke_cfg)
 
     if hasattr(resp, "content"):
         c = resp.content
@@ -131,8 +136,13 @@ def analyze_doc_node(state: DocumentState, config: RunnableConfig) -> DocumentSt
     {truncated_text}
     """
     
-    with langfuse_session(session_id=s_id, user_id=u_id):
-        response = llm.invoke(prompt, config={'callbacks': callbacks})
+    with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
+        invoke_cfg = merge_runnable_config(
+            config,
+            callbacks=callbacks,
+            metadata=lf_metadata,
+        )
+        response = llm.invoke(prompt, config=invoke_cfg)
         
     return {
         "analysis_summary": response.content,

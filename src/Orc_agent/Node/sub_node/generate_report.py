@@ -8,7 +8,8 @@ from pptx.util import Inches, Pt
 from xhtml2pdf import pisa
 
 from ...core.llm_factory import LLMFactory
-from ...core.observe import langfuse_session, observe
+from ...core.observe import langfuse_session, merge_runnable_config, observe
+from langchain_core.runnables import RunnableConfig
 from src.agent.prompt_engineering.prompts import REPORT_PROMPT
 from ...State.state import ReportState
 
@@ -58,7 +59,7 @@ def report_supervisor(state: ReportState) -> ReportState:
     # 3. If all done (or just markdown requested), finish
     return {"next_worker": "FINISH"}
 @observe(name="generate_content")
-def generate_content(state: ReportState) -> ReportState:
+def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
     """
     Generates report content in Markdown format using LLM.
     """
@@ -76,8 +77,8 @@ def generate_content(state: ReportState) -> ReportState:
     try:
         # LLM Setup
         llm, callbacks = LLMFactory.create(
-            provider="openai",
-            model="gpt-4o",
+            provider="google",
+            model="gemma-3-27b-it",
             temperature=0.3,
         )
         
@@ -107,8 +108,13 @@ def generate_content(state: ReportState) -> ReportState:
             figure_markdown=figure_markdown
         )
 
-        with langfuse_session(session_id="generate-report", tags=["generate_report"]):
-            response = llm.invoke(prompt, config={"callbacks": callbacks})
+        with langfuse_session(session_id="generate-report", tags=["generate_report"]) as lf_metadata:
+            invoke_cfg = merge_runnable_config(
+                config,
+                callbacks=callbacks,
+                metadata=lf_metadata,
+            )
+            response = llm.invoke(prompt, config=invoke_cfg)
         
         # Handle DummyLLM response
         if hasattr(response, 'content'):
