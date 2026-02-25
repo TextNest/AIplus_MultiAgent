@@ -48,7 +48,7 @@ class ReportState(TypedDict):
     # Internal State
     final_report: Optional[str]  # Markdown content
     report_format: List[str]     # Requested formats (pdf, html, pptx)
-    report_type: Optional[str]   # Report type (general, decision, marketing)
+    report_style: Optional[str]   # Report type (general, decision, marketing)
     generated_formats: Annotated[List[str], merge_logs] # Track generated formats
     steps_log: Annotated[List[str], merge_logs]
     next_worker: str             # Control flow
