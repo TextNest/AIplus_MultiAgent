@@ -111,6 +111,7 @@ def main():
                     st.session_state.df_preview = df
             
             report_format = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
+            report_style = st.selectbox("보고서 유형 선택", ["일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"])
             
             if st.button("🚀 분석 시작", type="primary"):
                 st.session_state.is_running = True
@@ -255,7 +256,8 @@ def run_engine(log_container, graph_placeholder, user_query, report_format):
         initial_state = {
             "file_path": st.session_state.uploaded_file_path,
             "user_query": user_query,
-            "report_type": report_format
+            "report_type": report_format,
+            "report_style": report_style
         }
         input_data = initial_state
     else:

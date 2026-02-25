@@ -10,7 +10,7 @@ from xhtml2pdf import pisa
 from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session, merge_runnable_config, observe
 from langchain_core.runnables import RunnableConfig
-from src.agent.prompt_engineering.prompts import REPORT_PROMPT
+from src.Orc_agent.core.prompts import REPORT_PROMPT_GENERAL, REPORT_PROMPT_DECISION, REPORT_PROMPT_MARKETING
 from ...State.state import ReportState
 
 from src.Orc_agent.core.logger import logger
@@ -58,6 +58,7 @@ def report_supervisor(state: ReportState) -> ReportState:
         
     # 3. If all done (or just markdown requested), finish
     return {"next_worker": "FINISH"}
+
 @observe(name="generate_content")
 def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
     """
@@ -87,11 +88,11 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         if clean_data:
             df = pd.DataFrame(clean_data)
             data_summary = f"""
-- Data Source: {file_path}
-- Rows: {len(df):,}
-- Columns: {len(df.columns)}
-- Column List: {', '.join(df.columns)}
-"""
+            - Data Source: {file_path}
+            - Rows: {len(df):,}
+            - Columns: {len(df.columns)}
+            - Column List: {', '.join(df.columns)}
+            """
         
         # Visualization Context
         figure_markdown = ""
@@ -102,7 +103,14 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         
         all_results = "\n\n---\n\n".join(analysis_results)
         
-        prompt = REPORT_PROMPT.format(
+        prompt_map = {
+            "일반 리포트": REPORT_PROMPT_GENERAL,
+            "의사 결정 리포트": REPORT_PROMPT_DECISION,
+            "마케팅 예산 분배 리포트": REPORT_PROMPT_MARKETING
+        }
+        selected_style = state.get("report_style", "일반 리포트")
+        prompt_template = prompt_map.get(selected_style, REPORT_PROMPT_GENERAL)
+        prompt = prompt_template.format(
             data_summary=data_summary,
             all_results=all_results,
             figure_markdown=figure_markdown

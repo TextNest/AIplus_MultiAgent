@@ -3,8 +3,9 @@ Modular Prompt Repository
 Role: Centralized management of LLM prompts.
 """
 
+# 보고서 생성 프롬프트
 
-REPORT_PROMPT = """
+REPORT_PROMPT_GENERAL = """
 You are a Data Analyst and Auditor. Write a professional business report including a technical audit.
 
 ## Data Info
@@ -36,6 +37,18 @@ You are a Data Analyst and Auditor. Write a professional business report includi
    - 통계, 패턴, 상관관계 등
 ## 5. 결론 및 제언
    - 비즈니스 관점의 제언
+"""
+
+REPORT_PROMPT_DECISION = """
+You are a Data Analyst and Auditor.
+Write a professional business report focused on SWOT analysis and specific decision recommendations.
+
+"""
+
+REPORT_PROMPT_MARKETING = """
+You are a Data Analyst and Auditor.
+Write a professional business report focused on ROI, budget allocation, and target audience segments.
+
 """
 
 
