@@ -219,3 +219,4 @@ __marimo__/
 test/test_repro_hitl.py
 test/test_subgraph_direct.py
 test/debug_subgraph.py
+test/test_app_mock.py

@@ -199,7 +199,7 @@ def main():
 
     # === Auto-Run Logic ===
     if st.session_state.is_running:
-        run_engine(log_container, graph_placeholder, user_query, report_format)
+        run_engine(log_container, graph_placeholder, user_query, report_format, report_style)
 
 
 def render_markdown_with_images(markdown_text):
@@ -234,7 +234,7 @@ def render_markdown_with_images(markdown_text):
 
 
 # === 7. 실행 엔진 ===
-def run_engine(log_container, graph_placeholder, user_query, report_format):
+def run_engine(log_container, graph_placeholder, user_query, report_format, report_style):
     graph, sub_apps = get_graph()
     analyze_app = sub_apps['analyze']
     
