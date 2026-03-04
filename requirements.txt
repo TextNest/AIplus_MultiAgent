@@ -29,6 +29,8 @@ markdown               # Markdown 변환
 python-pptx            # PPT 파일 생성 및 슬라이드 편집
 PyMuPDF                # PDF 텍스트 추출 (fitz)
 python-docx            # Word(docx) 텍스트 추출
+xhtml2pdf              # PDF 문서 생성
+reportlab              # 폰트 문제 해결
 
 # --- 외부 데이터 및 MCP 연동 ---
 mcp                    # Model Context Protocol 라이브러리

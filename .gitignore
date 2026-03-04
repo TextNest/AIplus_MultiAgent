@@ -215,8 +215,7 @@ __marimo__/
 
 *.png
 *.pdf
-*.html  
-test/test_repro_hitl.py
-test/test_subgraph_direct.py
-test/debug_subgraph.py
-test/test_app_mock.py
+*.html 
+
+# 테스트용 코드 모음
+test/
