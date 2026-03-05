@@ -101,7 +101,26 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
             for fig in figure_list:
                 figure_markdown += f"![{fig}]({fig})\n"
         
-        all_results = "\n\n---\n\n".join(analysis_results)
+        # Process Analysis Results
+        processed_results = []
+        if isinstance(analysis_results, dict):
+            for key, value in analysis_results.items():
+                insight = ""
+                if isinstance(value, dict):
+                    insight = value.get("insight", "")
+                else:
+                    insight = str(value)
+                
+                if insight:
+                    if "overall" in key.lower():
+                        processed_results.append(f"### [Overall Insight]\n{insight}")
+                    else:
+                        processed_results.append(f"### [Insight for {key}]\n{insight}")
+        elif isinstance(analysis_results, list):
+            for res in analysis_results:
+                processed_results.append(str(res))
+        
+        all_results = "\n\n---\n\n".join(processed_results)
         
         prompt_map = {
             "일반 리포트": REPORT_PROMPT_GENERAL,

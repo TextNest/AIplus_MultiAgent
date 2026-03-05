@@ -76,8 +76,8 @@ def test_report_generation():
             }
         }
 
-    # generate_content 내부의 .join(analysis_results) 처리를 위해 insight 텍스트 리스트로 변환
-    analysis_results = [v["insight"] for v in analysis_results_raw.values()]
+    # 실제 state와 동일한 구조로 전달합니다.
+    analysis_results = analysis_results_raw
 
     sample_state = {
         "analysis_results": analysis_results,

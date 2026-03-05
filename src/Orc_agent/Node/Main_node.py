@@ -106,19 +106,12 @@ def final_report(sub_app):
     @observe(name="final_report")
     def final_report_node(state: AgentState, config: RunnableConfig):
         insights = state.get("analysis_results", {})
-        insight_texts = []
-        if insights:
-            overall = insights.get("overall", {}).get("insight", "")
-            if overall: 
-                insight_texts.append(f"## Overall Insight\n{overall}")
-            
-            for key, val in insights.items():
-                if key == "overall": continue
-                insight_texts.append(f"## Analysis: {key}\n{val.get('insight','')}")
-        logger.info(insight_texts)
+        
+        # Log for debugging
+        logger.info(f"Passing insights to report subgraph: {list(insights.keys())}")
 
         sub_input = {
-            "analysis_results": insight_texts,
+            "analysis_results": insights,
             "figure_list": state.get("figure_list", []),
             "file_path": state.get("file_path", ""),
             "report_format": state.get("report_type", ["markdown"]),
