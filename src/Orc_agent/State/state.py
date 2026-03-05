@@ -40,10 +40,10 @@ class ReportState(TypedDict):
     Independent from AgentState to minimize coupling.
     """
     # Inputs from Main Agent
-    analysis_results: List[str]  # Text insights
-    figure_list: List[str]       # Image paths
-    file_path: str               # Data source path
-    clean_data: Optional[dict]   # Raw data sample (optional)
+    analysis_results: Optional[dict]  # Text insights
+    figure_list: List[str]            # Image paths
+    file_path: str                    # Data source path
+    clean_data: Optional[dict]        # Raw data sample (optional)
 
     # Internal State
     final_report: Optional[str]  # Markdown content

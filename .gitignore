@@ -216,6 +216,3 @@ __marimo__/
 *.png
 *.pdf
 *.html 
-
-# 테스트용 코드 모음
-test/
