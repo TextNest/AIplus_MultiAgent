@@ -10,7 +10,12 @@ from xhtml2pdf import pisa
 from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session, merge_runnable_config, observe
 from langchain_core.runnables import RunnableConfig
-from src.Orc_agent.core.prompts import REPORT_PROMPT_GENERAL, REPORT_PROMPT_DECISION, REPORT_PROMPT_MARKETING
+from src.Orc_agent.core.prompts import (
+    REPORT_PROMPT_GENERAL, 
+    REPORT_PROMPT_DECISION, 
+    REPORT_PROMPT_MARKETING,
+    REPORT_STYLE_CLASSIFICATION_PROMPT
+)
 from ...State.state import ReportState
 
 from src.Orc_agent.core.logger import logger
@@ -28,7 +33,8 @@ def report_supervisor(state: ReportState) -> ReportState:
     """
     final_report = state.get("final_report")
     report_format = state.get("report_format", ["markdown"])
-    logger.info(f"현재 등록된 보고서 형식 : {report_format}")
+    report_style = state.get("report_style")
+    logger.info(f"현재 등록된 보고서 형식 : {report_format}, 스타일: {report_style}")
 
     
     # Ensure report_format is a list of lowercase strings
@@ -44,6 +50,9 @@ def report_supervisor(state: ReportState) -> ReportState:
 
     # 1. If Markdown content is missing, generate it first
     if not final_report:
+        # If report style is not decided or set to "AI 자동 판단 (추천)", classify it first
+        if not report_style or report_style == "AI 자동 판단 (추천)":
+            return {"next_worker": "classify_report_style"}
         return {"next_worker": "generate_content"}
     
     # 2. Check for requested formats that haven't been generated yet
@@ -58,6 +67,64 @@ def report_supervisor(state: ReportState) -> ReportState:
         
     # 3. If all done (or just markdown requested), finish
     return {"next_worker": "FINISH"}
+
+@observe(name="classify_report_style")
+def classify_report_style(state: ReportState, config: RunnableConfig) -> ReportState:
+    """
+    Classifies the analysis results to choose the best report style using overall_insight.
+    """
+    analysis_results = state.get("analysis_results", {})
+    
+    if not analysis_results:
+        return {"report_style": "일반 리포트", "steps_log": ["[Report] No analysis results, defaulting to 일반 리포트"]}
+    
+    try:
+        llm, callbacks = LLMFactory.create(
+            provider="google",
+            model="gemma-3-27b-it",
+            temperature=0,
+        )
+        
+        # Extract overall insights for classification
+        overall_insights = []
+        if isinstance(analysis_results, dict):
+            for key, value in analysis_results.items():
+                if "overall" in key.lower():
+                    insight = value.get("insight", "") if isinstance(value, dict) else str(value)
+                    if insight:
+                        overall_insights.append(insight)
+        
+        all_overall_text = "\n".join(overall_insights)
+        if not all_overall_text:
+             # Fallback: use first few results if overall is missing
+             all_overall_text = str(list(analysis_results.values())[0])[:1000]
+
+        prompt = REPORT_STYLE_CLASSIFICATION_PROMPT.format(overall_insight=all_overall_text)
+
+        response = llm.invoke(prompt, config=config)
+        selected_style = response.content.strip()
+        
+        # Validation
+        valid_styles = ["일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"]
+        if selected_style not in valid_styles:
+            for style in valid_styles:
+                if style in selected_style:
+                    selected_style = style
+                    break
+            else:
+                selected_style = "일반 리포트"
+
+        logger.info(f"AI가 선택한 보고서 스타일: {selected_style}")
+        return {
+            "report_style": selected_style,
+            "steps_log": [f"[Report] AI classified report style as: {selected_style}"]
+        }
+    except Exception as e:
+        logger.error(f"보고서 스타일 분류 중 오류: {e}")
+        return {
+            "report_style": "일반 리포트",
+            "steps_log": [f"[Report] Classification failed, defaulting to 일반 리포트: {str(e)}"]
+        }
 
 @observe(name="generate_content")
 def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:

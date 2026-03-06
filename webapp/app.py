@@ -111,7 +111,7 @@ def main():
                     st.session_state.df_preview = df
             
             report_format = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
-            report_style = st.selectbox("보고서 유형 선택", ["일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"])
+            report_style = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
             
             if st.button("🚀 분석 시작", type="primary"):
                 st.session_state.is_running = True
