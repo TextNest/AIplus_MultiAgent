@@ -1,8 +1,8 @@
+from typing import Any, Optional
 
 from ..State.state import AgentState
 from pydantic import BaseModel, Field
 from langchain_core.runnables import RunnableConfig
-from langgraph.errors import NodeInterrupt
 from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session, observe
 from src.Orc_agent.core.logger import logger
@@ -41,20 +41,22 @@ def preprocessing(state: AgentState, config: RunnableConfig):
 
 def analysis(sub_app):
     @observe(name="analysis")
-    def analysis_node(state: AgentState, config: RunnableConfig):
+    def analysis_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         logger.info(f">>> [분석 노드] 서브그래프 상태 확인 중...")
-        parent_thread_id = config["configurable"].get("thread_id")
+        configurable = config.get("configurable", {})
+        parent_thread_id = configurable.get("thread_id", "main")
         sub_thread_id = f"{parent_thread_id}_sub"
         sub_config = config.copy()
         sub_config["configurable"] = {
             "thread_id": sub_thread_id,
-            "user_id": config["configurable"].get("user_id")
+            "user_id": configurable.get("user_id"),
+            "session_id": configurable.get("session_id"),
         }
 
         snapshot = sub_app.get_state(sub_config)
         logger.info(f">>> [분석 노드] 다음 서브그래프: {snapshot.next}")
         
-        result = None
+        result: Optional[dict[str, Any]] = None
         
         if snapshot.next:
             logger.info(f">>> [분석 노드]  {snapshot.next} 부터 다시 시작합니다.")
@@ -70,7 +72,7 @@ def analysis(sub_app):
             sub_input = {
                 "preprocessing_data": state["file_path"],
                 "user_query": state["user_query"],
-                "feed_back": [state.get("feed_back","")] if state.get("feed_back") else []
+                "feed_back": [],
             }
             
             for chunk in sub_app.stream(sub_input, config=sub_config, stream_mode="values"):
@@ -84,8 +86,14 @@ def analysis(sub_app):
         final_snapshot = sub_app.get_state(sub_config)
         
         if final_snapshot.next:
-            logger.info(f">>> [분석 노드] 서브그래프가 {final_snapshot.next} 에서 멈췄습니다.")
-            raise NodeInterrupt(f"서브그래프가 {final_snapshot.next} 에서 멈췄습니다.")
+            logger.info(f">>> [분석 노드] 서브그래프가 {final_snapshot.next} 에서 일시정지되었습니다. 현재 결과를 사용해 계속 진행합니다.")
+            if final_snapshot.next != ("Wait",):
+                return {
+                    "analysis_results": {
+                        "error": f"Unexpected subgraph pause: {final_snapshot.next}"
+                    },
+                    "figure_list": result.get("result_img_paths", []) if result else []
+                }
         
         if result and "final_insight" in result:
              logger.info(f">>> [분석 노드] 서브그래프가 성공적으로 종료되었습니다.")
@@ -105,7 +113,7 @@ def analysis(sub_app):
 def final_report(sub_app):
     @observe(name="final_report")
     def final_report_node(state: AgentState, config: RunnableConfig):
-        insights = state.get("analysis_results", {})
+        insights = state.get("analysis_results") or {}
         
         # Log for debugging
         logger.info(f"Passing insights to report subgraph: {list(insights.keys())}")
@@ -130,7 +138,7 @@ def final_report(sub_app):
 
 
 
-def file_type(state:AgentState,config:RunnableConfig)->AgentState:
+def file_type(state: AgentState, config: RunnableConfig) -> dict[str, str]:
     file_path = state["file_path"]
     file_type = file_path.split(".")[-1]
     if file_type == "csv":
@@ -144,7 +152,7 @@ def file_type(state:AgentState,config:RunnableConfig)->AgentState:
             "file_type":"document"
         }
 
-def select_agent(state:AgentState,config:RunnableConfig)->AgentState:
+def select_agent(state: AgentState, config: RunnableConfig) -> str:
     file_type = state["file_type"]
     if file_type == "tabular":
         logger.info(f">>> [에이전트선택 노드] 에이전트 타입: {file_type}")
@@ -153,14 +161,14 @@ def select_agent(state:AgentState,config:RunnableConfig)->AgentState:
         logger.info(f">>> [에이전트선택 노드] 에이전트 타입: {file_type}")
         return "document"
 
-def human_review_wait(state:AgentState,config:RunnableConfig)->AgentState:
+def human_review_wait(state: AgentState, config: RunnableConfig) -> None:
     logger.info(f">>> [휴먼리뷰 대기 노드] 서브그래프 상태 확인 중...")
-    pass
+    return None
 
-def human_review_route(state:AgentState,config:RunnableConfig)->AgentState:
+def human_review_route(state: AgentState, config: RunnableConfig) -> str:
     if state["human_feedback"] == "APPROVE":
         logger.info(f">>> [휴먼리뷰 라우트 노드] 승인됨")
-        return "END"
+        return "final_report"
     else:
         logger.info(f">>> [휴먼리뷰 라우트 노드] 거절됨")
         return "analysis"

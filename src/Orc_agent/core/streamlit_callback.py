@@ -22,6 +22,21 @@ class StreamlitAgentCallback(BaseCallbackHandler):
         self.graph_container = graph_container
         self.current_step = None
 
+    def __deepcopy__(self, memo):
+        # Streamlit DeltaGenerator 객체는 _thread.lock을 포함하여 deepcopy 불가.
+        # LangGraph가 서브그래프 config 전달 시 deepcopy를 시도하므로,
+        # 동일 인스턴스를 반환하여 모든 그래프/서브그래프가 같은 콜백을 공유하도록 함.
+        return self
+
+    def __getstate__(self):
+        # pickle 호환: 직렬화 불가능한 Streamlit 컨테이너 제외
+        return {"current_step": self.current_step}
+
+    def __setstate__(self, state):
+        self.current_step = state.get("current_step")
+        self.log_container = None
+        self.graph_container = None
+
     def on_chain_start(self, serialized: Optional[Dict[str, Any]], inputs: Dict[str, Any], **kwargs: Any) -> Any:
         # 체인 이름이 있는 경우 (Graph의 Node 이름 등)
         if serialized:

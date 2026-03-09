@@ -7,12 +7,11 @@ Langfuse Observability 중앙 모듈
 """
 
 import os
-from copy import deepcopy
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional
 from langchain_core.runnables import RunnableConfig
 
-_observe_fn: Optional[Callable] = None
+_observe_fn: Optional[Callable[..., Any]] = None
 
 
 def is_langfuse_enabled() -> bool:
@@ -56,7 +55,8 @@ def _get_observe():
 
 def observe(name: Optional[str] = None):
     """Langfuse observe 또는 no-op (credentials 미설정 시)"""
-    return _get_observe()(name=name)
+    observe_fn = _get_observe()
+    return observe_fn(name=name)
 
 
 # ---------------------------------------------------------------------------
@@ -185,20 +185,31 @@ def merge_runnable_config(
     metadata: Optional[Dict[str, Any]] = None,
     tags: Optional[List[str]] = None,
 ) -> RunnableConfig:
-    cfg: RunnableConfig = deepcopy(base) if base else {}
+    # [Fix] deepcopy(base) → shallow copy.
+    # deepcopy는 config 내부의 LangGraph 콜백, Langfuse 핸들러 등에 포함된
+    # _thread.lock 객체를 직렬화하려다 실패함.
+    # callbacks는 공유 리소스(observer)이므로 참조 복사가 올바른 동작.
+    cfg: RunnableConfig = {}
+    if base:
+        cfg.update(base)
+
+    def _callback_handlers(value: Any) -> List[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return list(value)
+        if isinstance(value, tuple):
+            return list(value)
+        handlers = getattr(value, "handlers", None)
+        if handlers is not None:
+            return list(handlers)
+        return [value]
 
     if callbacks:
         existing_callbacks = cfg.get("callbacks")
         merged_callbacks = []
-        if isinstance(existing_callbacks, list):
-            merged_callbacks.extend(existing_callbacks)
-        elif existing_callbacks is not None:
-            merged_callbacks.append(existing_callbacks)
-
-        if isinstance(callbacks, list):
-            merged_callbacks.extend(callbacks)
-        else:
-            merged_callbacks.append(callbacks)
+        merged_callbacks.extend(_callback_handlers(existing_callbacks))
+        merged_callbacks.extend(_callback_handlers(callbacks))
         cfg["callbacks"] = merged_callbacks
 
     if metadata:

@@ -21,8 +21,8 @@ def create_main_graph():
     main_workflow.add_edge(START,"File_type")
     main_workflow.add_edge("File_analysis",END)
     main_workflow.add_edge("Preprocessing","Analysis")
-    main_workflow.add_edge("Analysis","Final_report")
-    main_workflow.add_edge("Final_report","Wait")
+    main_workflow.add_edge("Analysis","Wait")
+    main_workflow.add_edge("Final_report",END)
     main_workflow.add_conditional_edges(
         "File_type",
         Main_node.select_agent,
@@ -35,7 +35,7 @@ def create_main_graph():
         "Wait",
         Main_node.human_review_route,
         {
-            "END":END,
+            "final_report":"Final_report",
             "analysis":"Analysis"
         }
     )

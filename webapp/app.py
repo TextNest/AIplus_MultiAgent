@@ -18,12 +18,11 @@ import streamlit as st
 import pandas as pd
 import uuid
 import time
-from typing import Generator
+from typing import Any, Generator, Optional, cast
 from langchain_core.runnables import RunnableConfig
 
 # === 2. 모듈 임포트 ===
 from src.Orc_agent.Graph.Main_graph import create_main_graph
-from src.Orc_agent.core.streamlit_callback import StreamlitAgentCallback
 from webapp.graph_visualizer import generate_highlighted_graph
 
 # === 3. 페이지 설정 ===
@@ -72,6 +71,10 @@ def init_session():
         st.session_state.hitl_type = None # "sub" or "main"
     if "hitl_snapshot" not in st.session_state:
         st.session_state.hitl_snapshot = None
+    if "resume_mode" not in st.session_state:
+        st.session_state.resume_mode = False
+    if "resume_target" not in st.session_state:
+        st.session_state.resume_target = None
 
 init_session()
 
@@ -114,8 +117,13 @@ def main():
             report_style = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
             
             if st.button("🚀 분석 시작", type="primary"):
+                st.session_state.thread_id = str(uuid.uuid4())
                 st.session_state.is_running = True
                 st.session_state.hitl_active = False
+                st.session_state.hitl_type = None
+                st.session_state.hitl_snapshot = None
+                st.session_state.resume_mode = False
+                st.session_state.resume_target = None
                 st.session_state.analysis_results = {}
                 st.session_state.figure_list = []
                 st.session_state.final_report = ""
@@ -138,12 +146,12 @@ def main():
         # 3. 메인 에이전트 피드백 (조건부 표시)
         if st.session_state.hitl_active and st.session_state.hitl_type == "main":
             with st.container(border=True):
-                st.warning("🛑 최종 보고서 검토 요청")
-                st.info("생성된 보고서를 승인하시겠습니까?")
+                st.warning("🛑 분석 결과 검토 요청")
+                st.info("생성된 시각화와 인사이트를 검토한 뒤, 리포트 생성을 진행할지 결정해주세요.")
                 
                 with st.form("main_hitl_form"):
                     action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])
-                    feedback_text = st.text_area("거절 사유 (거절 시 필수)", placeholder="거절 시 수정 요청 사항을 입력하세요.")
+                    feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
                     
                     if st.form_submit_button("결정 전송"):
                         handle_main_feedback(action, feedback_text)
@@ -176,25 +184,29 @@ def main():
     # --- [Center Column] 결과 디스플레이 ---
     with col_center:
         st.subheader("📊 분석 결과 및 보고서")
-        
-        tab1, tab2, tab3 = st.tabs(["📋 데이터 미리보기", "💡 시각화 및 인사이트", "📄 최종 보고서"])
-        
-        with tab1:
+
+        report_ready = bool(st.session_state.final_report)
+        tabs = st.tabs(
+            ["📋 데이터 미리보기", "💡 시각화 및 인사이트", "📄 최종 보고서"]
+            if report_ready
+            else ["📋 데이터 미리보기", "💡 시각화 및 인사이트"]
+        )
+
+        with tabs[0]:
             if st.session_state.df_preview is not None:
                 st.dataframe(st.session_state.df_preview.head(20), width='stretch')
             else:
                 st.info("파일을 업로드하면 데이터가 표시됩니다.")
 
-        with tab2:
+        with tabs[1]:
             render_visualization_tab()
 
-        with tab3:
-            if st.session_state.final_report:
+            if st.session_state.analysis_results and not report_ready:
+                st.caption("분석 피드백이 완료되면 최종 보고서 탭이 나타납니다.")
+
+        if report_ready:
+            with tabs[2]:
                 render_markdown_with_images(st.session_state.final_report)
-            elif st.session_state.analysis_results:
-                st.info("최종 보고서가 아직 생성되지 않았습니다.")
-            else:
-                st.info("분석 결과가 없습니다.")
 
 
     # === Auto-Run Logic ===
@@ -238,22 +250,63 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
     graph, sub_apps = get_graph()
     analyze_app = sub_apps['analyze']
     
-    config = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": st.session_state.thread_id, "user_id": "streamlit_user"},
     }
     
-    # Callback setup (Graph Placeholder 전달)
-    st_callback = StreamlitAgentCallback(log_container, graph_placeholder)
-    config["callbacks"] = [st_callback]
-    
+    resume_target = st.session_state.get("resume_target")
+
     # 초기 실행인지, 재개하는 것인지 확인
-    if st.session_state.get("resume_mode", False):
+    if st.session_state.get("resume_mode", False) and resume_target == "sub":
+        sub_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": f"{st.session_state.thread_id}_sub",
+                "user_id": "streamlit_user",
+            }
+        }
+
+        st.session_state.resume_mode = False
+        st.session_state.resume_target = None
+
+        try:
+            for chunk in analyze_app.stream(None, config=sub_config, stream_mode="values"):
+                dot = generate_highlighted_graph("Analysis")
+                st.session_state["last_graph_dot"] = dot
+                graph_placeholder.graphviz_chart(dot, width='stretch')
+
+                if "result_img_paths" in chunk:
+                    st.session_state.figure_list = chunk.get("result_img_paths", [])
+                if "final_insight" in chunk:
+                    st.session_state.analysis_results = chunk.get("final_insight", {})
+
+            sub_snapshot = analyze_app.get_state(sub_config)
+            if sub_snapshot.next:
+                st.session_state.is_running = False
+                st.session_state.hitl_active = True
+                st.session_state.hitl_type = "sub"
+                if hasattr(sub_snapshot, "values"):
+                    st.session_state.hitl_snapshot = sub_snapshot.values
+                st.rerun()
+                return
+
+            st.session_state.is_running = False
+            st.session_state.hitl_active = True
+            st.session_state.hitl_type = "main"
+            st.session_state.hitl_snapshot = None
+            st.rerun()
+            return
+        except Exception as e:
+            st.error(f"실행 중 오류 발생: {e}")
+            st.session_state.is_running = False
+            return
+    elif st.session_state.get("resume_mode", False):
         # [Bugfix] 재개 모드라면 입력값 없이 실행 (이전 상태 유지)
         input_data = None
         st.session_state.resume_mode = False # 사용 후 초기화
+        st.session_state.resume_target = None
     elif not st.session_state.hitl_active:
         # 처음 시작
-        initial_state = {
+        initial_state: dict[str, Any] = {
             "file_path": st.session_state.uploaded_file_path,
             "user_query": user_query,
             "report_type": report_format,
@@ -265,10 +318,16 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
 
     try:
         # 스트리밍 실행
-        for event in graph.stream(input_data, config=config):
+        stream_input = cast(Optional[Any], input_data)
+        for event in graph.stream(stream_input, config=config):
             for key, value in event.items():
                 # 로그 저장
                 msg = f"Completed Node: {key}"
+
+                if key in {"File_type", "File_analysis", "Preprocessing", "Analysis", "Wait", "Final_report"}:
+                    dot = generate_highlighted_graph(key)
+                    st.session_state["last_graph_dot"] = dot
+                    graph_placeholder.graphviz_chart(dot, width='stretch')
                 
                 # 분석 결과 저장 (실시간 업데이트)
                 if key == "Analysis" and "analysis_results" in value:
@@ -278,21 +337,12 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
                 if key == "Final_report" and "final_report" in value:
                     st.session_state.final_report = value["final_report"]
 
-        # 스트림 루프 종료 후 상태 체크 (Interrupt 확인)
-        snapshot = graph.get_state(config)
-        
-        if snapshot.next:
-             # Wait 노드 (Main HITL)
-             if snapshot.next[0] == "Wait":
-                 st.session_state.is_running = False
-                 st.session_state.hitl_active = True
-                 st.session_state.hitl_type = "main"
-                 st.rerun()
-                 return
-        
         # Sub Agent의 상태 확인 (Analysis 노드 내부 Interrupt)
-        sub_config = config.copy()
-        sub_config["configurable"]["thread_id"] = f"{st.session_state.thread_id}_sub"
+        sub_config = cast(RunnableConfig, cast(object, {**config}))
+        sub_config["configurable"] = {
+            **cast(dict[str, Any], config.get("configurable", {})),
+            "thread_id": f"{st.session_state.thread_id}_sub",
+        }
         sub_snapshot = analyze_app.get_state(sub_config)
         
         if sub_snapshot.next:
@@ -306,6 +356,17 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
                  
              st.rerun()
              return
+
+        # 스트림 루프 종료 후 상태 체크 (Interrupt 확인)
+        snapshot = graph.get_state(config)
+
+        if snapshot.next:
+             if snapshot.next[0] == "Wait":
+                 st.session_state.is_running = False
+                 st.session_state.hitl_active = True
+                 st.session_state.hitl_type = "main"
+                 st.rerun()
+                 return
 
         # 완전히 끝남
         st.session_state.is_running = False
@@ -323,14 +384,29 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
              st.session_state.hitl_type = "sub"
              # 에러 발생 시에도 sub snapshot 확인 시도
              try:
-                sub_config = config.copy()
-                sub_config["configurable"]["thread_id"] = f"{st.session_state.thread_id}_sub"
+                sub_config = cast(RunnableConfig, cast(object, {**config}))
+                sub_config["configurable"] = {
+                    **cast(dict[str, Any], config.get("configurable", {})),
+                    "thread_id": f"{st.session_state.thread_id}_sub",
+                }
                 sub_snapshot = analyze_app.get_state(sub_config)
                 if hasattr(sub_snapshot, "values"):
                     st.session_state.hitl_snapshot = sub_snapshot.values
              except:
                  pass
              st.rerun()
+        elif "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
+            st.error(
+                "LLM 호출이 quota 한도에 걸렸습니다. 현재 설정된 Google Gemini 키로는 분석을 계속할 수 없습니다. "
+                "유효한 다른 provider 키를 넣거나, Gemini quota가 남은 키로 교체한 뒤 다시 시도해주세요."
+            )
+            st.session_state.is_running = False
+        elif "invalid_api_key" in error_msg.lower() or "incorrect api key" in error_msg.lower() or "authentication" in error_msg.lower() or "api key" in error_msg.lower():
+            st.error(
+                "LLM API 키 인증에 실패했습니다. 현재 설정된 provider 키가 더미이거나 유효하지 않습니다. "
+                "실사용 가능한 API 키를 `.env`에 설정한 뒤 다시 시도해주세요."
+            )
+            st.session_state.is_running = False
         else:
             st.error(f"실행 중 오류 발생: {e}")
             st.session_state.is_running = False
@@ -340,7 +416,7 @@ def handle_sub_feedback(action, text):
     _, sub_apps = get_graph()
     analyze_app = sub_apps['analyze']
     
-    sub_config = {
+    sub_config: RunnableConfig = {
         "configurable": {"thread_id": f"{st.session_state.thread_id}_sub"}
     }
     
@@ -351,31 +427,59 @@ def handle_sub_feedback(action, text):
     analyze_app.update_state(sub_config, {
         "user_choice": val,
         "feed_back": [text]
-    })
+    }, as_node="Wait")
     
     st.session_state.hitl_active = False
     st.session_state.is_running = True # 다시 실행
     st.session_state.hitl_snapshot = None # 초기화
     st.session_state.resume_mode = True # [Bugfix] 재개 모드 활성화
+    st.session_state.resume_target = "sub"
     st.rerun()
 
 def handle_main_feedback(action, text):
-    graph, _ = get_graph()
+    graph, sub_apps = get_graph()
     
-    config = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": st.session_state.thread_id}
     }
     
     val = "APPROVE" if "Approve" in action else "REJECT"
-    
+
+    if val == "APPROVE":
+        snapshot = graph.get_state(config)
+        values = snapshot.values if hasattr(snapshot, "values") else {}
+        report_app = sub_apps["report"]
+
+        sub_input = {
+            "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
+            "figure_list": values.get("figure_list") or st.session_state.figure_list,
+            "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
+            "report_format": values.get("report_type", ["Markdown"]),
+            "clean_data": values.get("clean_data"),
+        }
+
+        result = report_app.invoke(sub_input, config=config)
+        final_report = result.get("final_report", "")
+
+        st.session_state.final_report = final_report
+        st.session_state.hitl_active = False
+        st.session_state.hitl_type = None
+        st.session_state.is_running = False
+        st.session_state.resume_mode = False
+        st.session_state.resume_target = None
+        st.balloons()
+        st.rerun()
+        return
+
     graph.update_state(config, {
         "human_feedback": val,
         "feedback": text
-    })
-    
+    }, as_node="Wait")
+
     st.session_state.hitl_active = False
     st.session_state.is_running = True
     st.session_state.resume_mode = True # [Bugfix] 재개 모드 활성화
+    st.session_state.resume_target = "main"
     st.rerun()
 
 # === 9. 시각화 및 인사이트 렌더링 (Pagination & Pairing) ===
@@ -405,22 +509,24 @@ def render_visualization_tab():
     texts = []
     items = []
     
-    # # (1) Overall Insight
-    # if "overall" in results:
-    #     overall_text = results["overall"].get("insight", "")
-    #     if overall_text:
-    #         items.append({
-    #             "type": "overall",
-    #             "title": "📊 종합 인사이트 (Overall Insight)",
-    #             "text": overall_text
-    #         })
+    # (1) Overall Insight(s)
+    for key, value in results.items():
+        if not isinstance(key, str) or not key.startswith("overall"):
+            continue
+        overall_text = value.get("insight", "") if isinstance(value, dict) else str(value)
+        if overall_text:
+            items.append({
+                "type": "overall",
+                "title": f"📊 종합 인사이트: {key}",
+                "text": overall_text
+            })
             
     # (2) Image + Insight Pairs
     # figures 리스트를 순회하며 매칭되는 insight를 찾음
     # final_insight 키는 보통 파일명(basename)임
     
     # 매칭된 인사이트 키를 추적하여 나중에 남은 것 처리
-    matched_keys = set(["overall"])
+    matched_keys = {key for key in results.keys() if isinstance(key, str) and key.startswith("overall")}
     
     for fig_path in figures:
         if not os.path.exists(fig_path):
@@ -429,6 +535,8 @@ def render_visualization_tab():
         file_name = os.path.basename(fig_path)
         insight_data = results.get(file_name, {})
         insight_text = insight_data.get("insight", "") if isinstance(insight_data, dict) else ""
+        if file_name in results:
+            matched_keys.add(file_name)
         
         # if file_name in results:
         #     matched_keys.add(file_name)
@@ -436,13 +544,16 @@ def render_visualization_tab():
         imgs.append(fig_path)
         
     # (3) Orphan Insights (이미지 없이 텍스트만 있는 경우)
-    # for key, val in results.items():
-    #     if key not in matched_keys:
-    #         txt = val.get("insight", "") if isinstance(val, dict) else str(val)
-    #         if txt:
-    #             # 짝이 안 맞는 텍스트는 이미지 없이 추가하거나, 별도 리스트로 관리
-    #             # 여기서는 items에 직접 추가하던 기존 로직을 유지하거나 리스트에 추가
-    #             pass # text 리스트와 싱크가 안 맞으므로 별도 처리 필요
+    for key, val in results.items():
+        if key in matched_keys:
+            continue
+        txt = val.get("insight", "") if isinstance(val, dict) else str(val)
+        if txt:
+            items.append({
+                "type": "text",
+                "title": f"📝 추가 인사이트: {key}",
+                "text": txt
+            })
 
     # zip으로 묶어서 추가 (이미지와 텍스트 순서가 보장되어야 함 - 현재 로직은 단순 순서 매칭이라 위험할 수 있음)
     # 하지만 사용자 의도대로 리스트를 합침

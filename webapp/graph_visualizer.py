@@ -31,7 +31,7 @@ def get_base_graph():
     dot.node('Preprocessing', '🧹 전처리')
     dot.node('Analysis', '🤖 데이터 분석 에이전트')
     dot.node('Final_report', '📝 리포트 생성 에이전트')
-    dot.node('Wait', '👤 피드백 대기', shape='diamond', style='filled', fillcolor='#FFE0B2', height='0.6', fontsize='10')
+    dot.node('Wait', '👤 분석 피드백 대기', shape='diamond', style='filled', fillcolor='#FFE0B2', height='0.6', fontsize='10')
 
     # === 엣지 정의 (흐름) ===
     
@@ -46,11 +46,11 @@ def get_base_graph():
     
     # 3. Tabular Flow (Vertical)
     dot.edge('Preprocessing', 'Analysis')
-    dot.edge('Analysis', 'Final_report')
-    dot.edge('Final_report', 'Wait')
+    dot.edge('Analysis', 'Wait')
+    dot.edge('Wait', 'Final_report', label='APPROVE')
     
     # 4. Human Review Loop & End
-    dot.edge('Wait', 'End', label='APPROVE')
+    dot.edge('Final_report', 'End')
 
     dot.edge('Wait', 'Analysis', label='REJECT', color='red', style='dashed', constraint='true', tailport='e', headport='e')
     
