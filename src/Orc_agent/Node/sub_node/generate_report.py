@@ -81,7 +81,7 @@ def classify_report_style(state: ReportState, config: RunnableConfig) -> ReportS
     try:
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemma-3-27b-it",
+            model="gemini-2.0-flash",
             temperature=0,
         )
         
@@ -146,7 +146,7 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         # LLM Setup
         llm, callbacks = LLMFactory.create(
             provider="google",
-            model="gemma-3-27b-it",
+            model="gemini-2.0-flash",
             temperature=0.3,
         )
         
