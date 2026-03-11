@@ -24,6 +24,7 @@ from langchain_core.runnables import RunnableConfig
 # === 2. 모듈 임포트 ===
 from src.Orc_agent.Graph.Main_graph import create_main_graph
 from webapp.graph_visualizer import generate_highlighted_graph
+from src.Orc_agent.core.streamlit_callback import StreamlitAgentCallback
 
 # === 3. 페이지 설정 ===
 st.set_page_config(
@@ -113,9 +114,6 @@ def main():
                     df = pd.read_csv(file_path)
                     st.session_state.df_preview = df
             
-            report_format = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
-            report_style = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
-            
             if st.button("🚀 분석 시작", type="primary"):
                 st.session_state.thread_id = str(uuid.uuid4())
                 st.session_state.is_running = True
@@ -147,14 +145,16 @@ def main():
         if st.session_state.hitl_active and st.session_state.hitl_type == "main":
             with st.container(border=True):
                 st.warning("🛑 분석 결과 검토 요청")
-                st.info("생성된 시각화와 인사이트를 검토한 뒤, 리포트 생성을 진행할지 결정해주세요.")
+                st.info("생성된 시각화와 인사이트를 검토한 뒤, 보고서 생성을 결정해주세요.")
                 
                 with st.form("main_hitl_form"):
-                    action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])
+                    format_choice = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
+                    style_choice = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
+                    action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])                
                     feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
                     
                     if st.form_submit_button("결정 전송"):
-                        handle_main_feedback(action, feedback_text)
+                        handle_main_feedback(action, feedback_text, format_choice, style_choice)
 
         # 4. 로그 출력 (간단히)
         with st.expander("📝 실행 로그", expanded=True):
@@ -211,7 +211,7 @@ def main():
 
     # === Auto-Run Logic ===
     if st.session_state.is_running:
-        run_engine(log_container, graph_placeholder, user_query, report_format, report_style)
+        run_engine(log_container, graph_placeholder, user_query)
 
 
 def render_markdown_with_images(markdown_text):
@@ -246,7 +246,7 @@ def render_markdown_with_images(markdown_text):
 
 
 # === 7. 실행 엔진 ===
-def run_engine(log_container, graph_placeholder, user_query, report_format, report_style):
+def run_engine(log_container, graph_placeholder, user_query):
     graph, sub_apps = get_graph()
     analyze_app = sub_apps['analyze']
     
@@ -254,6 +254,10 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
         "configurable": {"thread_id": st.session_state.thread_id, "user_id": "streamlit_user"},
     }
     
+    # Callback setup (Graph Placeholder 전달)
+    st_callback = StreamlitAgentCallback(log_container, graph_placeholder)
+    config["callbacks"] = [st_callback]
+
     resume_target = st.session_state.get("resume_target")
 
     # 초기 실행인지, 재개하는 것인지 확인
@@ -308,9 +312,7 @@ def run_engine(log_container, graph_placeholder, user_query, report_format, repo
         # 처음 시작
         initial_state: dict[str, Any] = {
             "file_path": st.session_state.uploaded_file_path,
-            "user_query": user_query,
-            "report_type": report_format,
-            "report_style": report_style
+            "user_query": user_query
         }
         input_data = initial_state
     else:
@@ -436,7 +438,7 @@ def handle_sub_feedback(action, text):
     st.session_state.resume_target = "sub"
     st.rerun()
 
-def handle_main_feedback(action, text):
+def handle_main_feedback(action, text, format_choice, style_choice):
     graph, sub_apps = get_graph()
     
     config: RunnableConfig = {
@@ -454,7 +456,8 @@ def handle_main_feedback(action, text):
             "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
             "figure_list": values.get("figure_list") or st.session_state.figure_list,
             "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
-            "report_format": values.get("report_type", ["Markdown"]),
+            "report_format": format_choice or ["Markdown"],
+            "report_style": style_choice,
             "clean_data": values.get("clean_data"),
         }
 

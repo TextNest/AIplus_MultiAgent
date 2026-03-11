@@ -22,7 +22,7 @@ def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
     """이미지 기반 PDF → Gemini Vision으로 텍스트 추출 (폴백)"""
     llm, callbacks = LLMFactory.create(
         provider="google",
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         temperature=0.0,
     )
 
