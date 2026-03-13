@@ -1,34 +1,3 @@
-"""
-Preprocessing Sub-Node Functions
-==================================
-노트북(marketing_reporting_agent_v2_5.ipynb) 전체 파이프라인(15개 노드)을
-Orc_agent 서브그래프 노드로 변환.
-
-analyze_data.py 구조를 따름:
-  - @observe 데코레이터
-  - (state: preprocessState, config: RunnableConfig) -> preprocessState 시그니처
-  - LLMFactory 를 통한 LLM 호출 (quality_gate_node)
-  - langfuse_session / merge_runnable_config 트레이싱
-  - logger 로깅
-
-노드 순서 (노트북 원본과 동일):
-  intake_node                        (Node 0)
-  raw_data_preprocessing_node        (Node 1)  — @tool detect/clean dirty numerics & dates
-  categorical_standardization_node   (Node 2)  — @tool boolean & synonym unification
-  duplicate_cleanup_node             (Node 3)  — @tool duplicate cols/rows & blank cols
-  date_integrity_node                (Node 4)  — @tool date completeness strategy
-  data_state_awareness_node          (Node 5)  — @tool profile & existing metrics
-  measurement_reconstruction_node    (Node 6)  — @tool classify column roles
-  metric_derivation_node             (Node 7)  — @tool derive rate/efficiency metrics
-  reliability_signals_node           (Node 8)  — @tool add reliability flags
-  semantic_cleanup_node              (Node 9)  — rule-based noise/artifact removal
-  funnel_leakage_node                (Node 10) — @tool compute funnel leakage
-  context_enrichment_node            (Node 11) — @tool share, trend, saturation, anomalies
-  final_assembly_node                (Node 12) — assemble reporting DataFrame
-  output_formatting_node             (Node 13) — format output (json/csv/md/agent_prompt)
-  quality_gate_node                  (Node 14) — LLM 기반 self-reflection loop
-"""
-
 import os
 import re
 import io
