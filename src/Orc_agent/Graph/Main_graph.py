@@ -3,10 +3,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from src.Orc_agent.State.state import AgentState
 from src.Orc_agent.Node import Main_node 
 from langgraph.graph import START
-from src.Orc_agent.Graph.sub_graph import analyze_data,document_agent,generate_report
+from src.Orc_agent.Graph.sub_graph import preprocess,analyze_data,document_agent,generate_report
 
 def create_main_graph():
     share_memory=MemorySaver()
+    preprocess_app = preprocess.preprocess_graph(share_memory)
     analyze_app = analyze_data.analyze_data_graph(share_memory)
     document_app = document_agent.document_agent_graph(share_memory)
     report_app = generate_report.generate_report_graph(share_memory)
@@ -14,7 +15,7 @@ def create_main_graph():
     main_workflow = StateGraph(AgentState)
     main_workflow.add_node("File_type",Main_node.file_type)
     main_workflow.add_node("File_analysis",Main_node.file_analyze(document_app))
-    main_workflow.add_node("Preprocessing",Main_node.preprocessing)#아직 추가 x
+    main_workflow.add_node("Preprocessing",Main_node.preprocessing(preprocess_app))
     main_workflow.add_node("Analysis",Main_node.analysis(analyze_app))
     main_workflow.add_node("Wait",Main_node.human_review_wait)
     main_workflow.add_node("Final_report",Main_node.final_report(report_app))
