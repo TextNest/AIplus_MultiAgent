@@ -48,6 +48,27 @@ st.markdown("""
 
 # === 4. 세션 상태 초기화 ===
 def init_session():
+    # --- [NEW] Page Routing State ---
+    if "page" not in st.session_state:
+        st.session_state.page = "settings" # 'settings' or 'main'
+    
+    # --- [NEW] API Key & Model State ---
+    if "selected_provider" not in st.session_state:
+        st.session_state.selected_provider = None
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = None
+    
+    # --- [NEW] Per-Node Model State ---
+    if "node_models" not in st.session_state:
+        st.session_state.node_models = {
+            "plan_node": {"provider": None, "model": None},
+            "make_node": {"provider": None, "model": None},
+            "eval_node": {"provider": None, "model": None},
+            "document_node": {"provider": None, "model": None},
+            "report_style_node": {"provider": None, "model": None},
+            "report_gen_node": {"provider": None, "model": None}
+        }
+
     if "thread_id" not in st.session_state:
         st.session_state.thread_id = str(uuid.uuid4())
     if "uploaded_file_path" not in st.session_state:
@@ -84,8 +105,220 @@ init_session()
 def get_graph():
     return create_main_graph()
 
+# === [NEW] API Model Fetchers ===
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_available_models(provider_key: str, api_key: str) -> list[str]:
+    """해당 제공자의 실제 사용 가능한 Chat 모델 리스트를 API를 통해 불러옵니다."""
+    models = []
+    if not api_key:
+        return models
+        
+    try:
+        if provider_key == "google":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    name = m.name.replace("models/", "")
+                    # Langchain ChatGoogleGenerativeAI와 호환되는 모델로 필터링 (embedding 등 제외)
+                    if ("gemini" in name or "gemma" in name) and "vision" not in name and "embedding" not in name:
+                        models.append(name)
+            models.sort(reverse=True)
+            
+        elif provider_key == "openai":
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            model_list = client.models.list()
+            for m in model_list.data:
+                # ChatOpenAI (LangChain) 에서 활용 가능한 텍스트/채팅 기반 모델만 필터링 
+                # (embedding, tts, whisper, dall-e 등 오디오/비전 전용 제외)
+                if ("gpt" in m.id or "o1" in m.id or "o3" in m.id) and "audio" not in m.id and "realtime" not in m.id:
+                    models.append(m.id)
+            models.sort(reverse=True)
+            
+        elif provider_key == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            try:
+                # 최신 Anthropic SDK 버전에 models.list() 가 있을 경우
+                model_list = client.models.list()
+                for m in model_list.data:
+                    # ChatAnthropic 호환을 위해 claude 모델만
+                    if "claude" in m.id:
+                        models.append(m.id)
+            except AttributeError:
+                # 만약 SDK에 해당 메소드가 없는 구버전일 경우 REST API로 폴백
+                import requests
+                headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+                response = requests.get("https://api.anthropic.com/v1/models", headers=headers)
+                if response.status_code == 200:
+                    data = response.json().get("data", [])
+                    models = [m["id"] for m in data if "claude" in m["id"]]
+            models.sort(reverse=True)
+            
+    except Exception as e:
+        st.warning(f"[{provider_key}] 실시간 모델 목록 불러오기 실패 (기본값 제공): {e}")
+        
+    # API 요청 실패 또는 아직 모델이 없는 경우의 기본값 Fallback
+    if not models:
+        if provider_key == "google": models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemma-3-27b-it"]
+        elif provider_key == "openai": models = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+        elif provider_key == "anthropic": models = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"]
+        
+    return models
+
+# === [NEW] 설정 페이지 렌더링 ===
+def render_settings_page():
+    st.title("⚙️ AI Data Analyst - 설정")
+    st.markdown("분석을 시작하기 전, 사용할 AI 모델과 API 키를 설정해주세요.")
+
+    # 1. 사용 가능한 키 
+    available_providers = []
+    if os.environ.get("GOOGLE_API_KEY"): available_providers.append("Google (Gemini)")
+    if os.environ.get("OPENAI_API_KEY"): available_providers.append("OpenAI (ChatGPT)")
+    if os.environ.get("ANTHROPIC_API_KEY"): available_providers.append("Anthropic (Claude)")
+
+    with st.container(border=True):
+        st.subheader("🔑 API 키 및 모델 선택")
+        
+        if available_providers:
+            st.success(f"✅ `.env` 파일에서 다음 제공자의 API 키를 찾았습니다: {', '.join(available_providers)}")
+            
+            provider_col, model_col = st.columns(2)
+            
+            with provider_col:
+                provider_choice = st.selectbox("AI 제공자 선택", available_providers)
+            
+            with model_col:
+                if provider_choice == "Google (Gemini)":
+                    provider_key = "google"
+                    api_key = os.environ.get("GOOGLE_API_KEY")
+                elif provider_choice == "OpenAI (ChatGPT)":
+                    provider_key = "openai"
+                    api_key = os.environ.get("OPENAI_API_KEY")
+                else: # Anthropic
+                    provider_key = "anthropic"
+                    api_key = os.environ.get("ANTHROPIC_API_KEY")
+                
+                fetched_models = get_available_models(provider_key, api_key)
+                model_choice = st.selectbox("모델 선택", fetched_models)
+
+            if st.button("다음 (에이전트별 모델 설정) ➡️", type="primary"):
+                # 기본값으로 메인 모델을 우선 설정해둠
+                st.session_state.selected_provider = provider_key
+                st.session_state.selected_model = model_choice
+                st.session_state.page = "settings_node"
+                st.rerun()
+
+        else:
+            st.warning("⚠️ `.env` 파일에서 API 키를 찾을 수 없습니다. 직접 입력해주세요.")
+            
+            manual_provider = st.selectbox("AI 제공자", ["Google", "OpenAI", "Anthropic"])
+            api_key_input = st.text_input(f"{manual_provider} API Key", type="password")
+            
+            if manual_provider == "Google":
+                env_key_name = "GOOGLE_API_KEY"
+                prov_key = "google"
+            elif manual_provider == "OpenAI":
+                env_key_name = "OPENAI_API_KEY"
+                prov_key = "openai"
+            else:
+                env_key_name = "ANTHROPIC_API_KEY"
+                prov_key = "anthropic"
+                
+            model_options = []
+            if api_key_input:
+                model_options = get_available_models(prov_key, api_key_input)
+            else:
+                if prov_key == "google": model_options = ["gemini-1.5-pro", "gemini-1.5-flash", "gemma-3-27b-it"]
+                elif prov_key == "openai": model_options = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+                elif prov_key == "anthropic": model_options = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"]
+                
+            manual_model = st.selectbox("모델", model_options)
+                
+            save_to_env = st.checkbox("앱의 `.env` 환경 변수로 임시 적용 (세션 동안 유지)")
+            
+            if st.button("다음 (에이전트별 모델 설정) ➡️", type="primary"):
+                if not api_key_input:
+                    st.error("API 키를 입력해주세요.")
+                else:
+                    if save_to_env:
+                        os.environ[env_key_name] = api_key_input
+                    st.session_state.selected_provider = prov_key
+                    st.session_state.selected_model = manual_model
+                    st.session_state.page = "settings_node"
+                    st.rerun()
+
+# === [NEW] 에이전트 노드별 모델 매핑 페이지 렌더링 ===
+def render_node_settings_page():
+    st.title("🧩 에이전트별 모델 매핑")
+    st.markdown("전체 오케스트레이션을 담당하는 **메인 그래프**와 각 특정 역할을 수행하는 **서브 그래프**들에 개별적으로 LLM 모델을 할당할 수 있습니다.")
+
+    available_keys = {}
+    if os.environ.get("GOOGLE_API_KEY"): available_keys["Google"] = "google"
+    if os.environ.get("OPENAI_API_KEY"): available_keys["OpenAI"] = "openai"
+    if os.environ.get("ANTHROPIC_API_KEY"): available_keys["Anthropic"] = "anthropic"
+
+    if not available_keys:
+        st.error("API 키가 없습니다. 이전 페이지로 돌아가 키를 등록해주세요.")
+        if st.button("⬅️ 이전으로"):
+            st.session_state.page = "settings"
+            st.rerun()
+        return
+
+    # 각 노드별 설정을 받는 UI 생성
+    def _render_node_selection(node_key, title, desc, col):
+        with col.container(border=True):
+            st.subheader(title)
+            st.caption(desc)
+            
+            # 제공자 선택
+            prov_label = st.selectbox(f"제공자 ({title})", list(available_keys.keys()), key=f"{node_key}_prov")
+            prov_val = available_keys[prov_label]
+            
+            # 해당 제공자의 모델 목록 가져오기
+            api_key = os.environ.get(f"{prov_label.upper()}_API_KEY")
+            models = get_available_models(prov_val, api_key)
+            
+            # 모델 선택 (이전 페이지에서 선택된 기본 모델이 있다면 기본값으로 세팅 시도)
+            default_index = 0
+            if models and st.session_state.selected_model in models:
+                default_index = models.index(st.session_state.selected_model)
+                
+            model_val = st.selectbox(f"모델 ({title})", models, index=default_index, key=f"{node_key}_mod")
+            
+            # State 저장
+            st.session_state.node_models[node_key]["provider"] = prov_val
+            st.session_state.node_models[node_key]["model"] = model_val
+
+    # 크고 시원한 3x2 그리드로 변경 (화면 꽉 채움)
+    c1, c2, c3 = st.columns(3)
+    _render_node_selection("plan_node", "🧭 Plan Node", "데이터 분석 구조와 계획을 기획합니다.\n*(추론 능력이 뛰어난 모델 권장)*", c1)
+    _render_node_selection("make_node", "💻 Make Node", "Pandas 코드를 직접 작성합니다.\n*(코드 생성에 특화된 모델 권장)*", c2)
+    _render_node_selection("eval_node", "⚖️ Evaluate Node", "생성된 코드의 에러와 반환값을 검증합니다.\n*(논리 검증 모델 권장)*", c3)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    c4, c5, c6 = st.columns(3)
+    _render_node_selection("document_node", "📄 Document Node", "문서를 파싱하고 분석합니다.\n*(비전/멀티모달 모델 권장)*", c4)
+    _render_node_selection("report_style_node", "🎭 Report Style Node", "최적의 보고서 서식 유형을 분류합니다.\n*(빠른 분류용 모델 권장)*", c5)
+    _render_node_selection("report_gen_node", "📝 Report Gen Node", "최종 보고서의 문맥을 생성합니다.\n*(텍스트 종합 능력 모델 권장)*", c6)
+
+    st.divider()
+    
+    col_back, col_space, col_start = st.columns([1, 4, 1])
+    with col_back:
+        if st.button("⬅️ 이전 페이지"):
+            st.session_state.page = "settings"
+            st.rerun()
+            
+    with col_start:
+        if st.button("🚀 최종 분석 시작", type="primary"):
+            st.session_state.page = "main"
+            st.rerun()
+
 # === 6. UI 레이아웃 구성 ===
-def main():
+def main_dashboard():
     # 3단 컬럼 구성 (좌: 1, 중: 2, 우: 1)
     col_left, col_center, col_right = st.columns([1, 2, 1])
 
@@ -312,7 +545,8 @@ def run_engine(log_container, graph_placeholder, user_query):
         # 처음 시작
         initial_state: dict[str, Any] = {
             "file_path": st.session_state.uploaded_file_path,
-            "user_query": user_query
+            "user_query": user_query,
+            "node_models": st.session_state.get("node_models", {})
         }
         input_data = initial_state
     else:
@@ -671,4 +905,9 @@ def render_download_buttons():
 
 
 if __name__ == "__main__":
-    main()
+    if st.session_state.page == "settings":
+        render_settings_page()
+    elif st.session_state.page == "settings_node":
+        render_node_settings_page()
+    else:
+        main_dashboard()

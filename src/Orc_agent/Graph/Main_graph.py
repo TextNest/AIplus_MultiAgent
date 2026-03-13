@@ -1,9 +1,9 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from ..State.state import AgentState
-from ..Node import Main_node 
+from src.Orc_agent.State.state import AgentState
+from src.Orc_agent.Node import Main_node 
 from langgraph.graph import START
-from .sub_graph import analyze_data,document_agent,generate_report
+from src.Orc_agent.Graph.sub_graph import analyze_data,document_agent,generate_report
 
 def create_main_graph():
     share_memory=MemorySaver()
@@ -21,8 +21,8 @@ def create_main_graph():
     main_workflow.add_edge(START,"File_type")
     main_workflow.add_edge("File_analysis",END)
     main_workflow.add_edge("Preprocessing","Analysis")
-    main_workflow.add_edge("Analysis","Wait")
-    main_workflow.add_edge("Final_report",END)
+    main_workflow.add_edge("Analysis","Final_report")
+    main_workflow.add_edge("Final_report","Wait")
     main_workflow.add_conditional_edges(
         "File_type",
         Main_node.select_agent,
@@ -35,7 +35,7 @@ def create_main_graph():
         "Wait",
         Main_node.human_review_route,
         {
-            "final_report":"Final_report",
+            "END":END,
             "analysis":"Analysis"
         }
     )

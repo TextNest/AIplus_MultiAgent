@@ -49,7 +49,10 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
     *주의: 파이썬 코드는 작성하지 말고 오직 '계획'만 작성하세요.*
     이미지 파일은 최대 3개만 만들 수 있도록 계획을 구축하세요. 다만 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다.
     """
-    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
+    node_conf = state.get("node_models", {}).get("plan_node", {})
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemma-3-27b-it"
+    llm, callbacks = LLMFactory.create(provider, model_name, temperature=0.3)
         
     with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
         invoke_cfg = merge_runnable_config(
@@ -66,7 +69,10 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
 def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
-    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
+    node_conf = state.get("node_models", {}).get("make_node", {})
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemma-3-27b-it"
+    llm, callbacks = LLMFactory.create(provider, model_name)
         
     if state.get("feed_back",None):
         text = f"수정사항: {state['feed_back']} 해당 수정사항을 반영하여 코드를 수정하세요"
@@ -246,9 +252,11 @@ def evaluation_code(state: analyzeState,config:RunnableConfig):
 
     위 결과가 계획대로 도출되었으며, 수치가 논리적으로 타당한지 검증하세요.
     결과가 타당하면 'APPROVE', 부족하거나 오류가 보이면 'REJECT'와 이유를 적으세요.
-    지금은 테스트 상황이니 'APPROVE'를 반환해주세요.
     """
-    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
+    node_conf = state.get("node_models", {}).get("eval_node", {})
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemma-3-27b-it"
+    llm, callbacks = LLMFactory.create(provider, model_name, temperature=0.3)
         
     with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
         invoke_cfg = merge_runnable_config(
@@ -360,7 +368,10 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
 
     msg = HumanMessage(content=messages_content)
     
-    llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
+    node_conf = state.get("node_models", {}).get("eval_node", {})
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemma-3-27b-it"
+    llm, callbacks = LLMFactory.create(provider, model_name, temperature=0.3)
     structured_llm = llm.with_structured_output(InsightOutput)
     
     try:
@@ -394,7 +405,10 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
                 
     except Exception as e:
         print(f"Structured Output Failed: {e}. Fallback to text.")
-        llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it', temperature=0.3)
+        node_conf = state.get("node_models", {}).get("eval_node", {})
+        provider = node_conf.get("provider") or "google"
+        model_name = node_conf.get("model") or "gemma-3-27b-it"
+        llm, callbacks = LLMFactory.create(provider, model_name, temperature=0.3)
         with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
             invoke_cfg = merge_runnable_config(
                 config,

@@ -10,11 +10,16 @@ from ...core.llm_factory import LLMFactory
 from ...core.observe import observe, langfuse_session, merge_runnable_config
 
 
-def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
+def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown", node_conf: dict = None) -> str:
     """이미지 기반 PDF → Gemini Vision으로 텍스트 추출 (폴백)"""
+    if node_conf is None:
+        node_conf = {}
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemini-2.5-flash"
+    
     llm, callbacks = LLMFactory.create(
-        provider="google",
-        model="gemini-2.5-flash",
+        provider=provider,
+        model=model_name,
         temperature=0.0,
     )
 
@@ -54,7 +59,7 @@ def _extract_pdf_via_gemini(file_path: str, session_id: str = "unknown") -> str:
     return str(resp)
 
 
-def _extract_pdf_text(file_path: str, session_id: str) -> str:
+def _extract_pdf_text(file_path: str, session_id: str, node_conf: dict = None) -> str:
     doc = fitz.open(file_path)
     pages = list(doc)
     text_parts = [p.get_text("text", sort=True).strip() for p in pages]
@@ -63,7 +68,7 @@ def _extract_pdf_text(file_path: str, session_id: str) -> str:
 
     # 텍스트가 너무 적으면 이미지로 간주
     if pages and total_chars < 50 * len(pages):
-        return _extract_pdf_via_gemini(file_path, session_id)
+        return _extract_pdf_via_gemini(file_path, session_id, node_conf)
 
     return "\n\n".join(p for p in text_parts if p)
 
@@ -88,9 +93,10 @@ def read_file_node(state: DocumentState, config: RunnableConfig) -> DocumentStat
     try:
         ext = file_path.split('.')[-1].lower()
         content = ""
+        node_conf = state.get("node_models", {}).get("document_node", {})
         
         if ext == "pdf":
-            content = _extract_pdf_text(file_path, s_id)
+            content = _extract_pdf_text(file_path, s_id, node_conf)
         elif ext in ["docx", "doc"]:
             content = _extract_word_text(file_path)
         else:
@@ -117,9 +123,13 @@ def analyze_doc_node(state: DocumentState, config: RunnableConfig) -> DocumentSt
     text = raw_data["content"]
     truncated_text = text[:3000] if len(text) > 3000 else text
 
+    node_conf = state.get("node_models", {}).get("document_node", {})
+    provider = node_conf.get("provider") or "google"
+    model_name = node_conf.get("model") or "gemini-2.5-flash"
+    
     llm, callbacks = LLMFactory.create(
-        provider="google",
-        model="gemini-2.5-flash",
+        provider=provider,
+        model=model_name,
         temperature=0.0
     )
     

@@ -79,9 +79,13 @@ def classify_report_style(state: ReportState, config: RunnableConfig) -> ReportS
         return {"report_style": "일반 리포트", "steps_log": ["[Report] No analysis results, defaulting to 일반 리포트"]}
     
     try:
+        node_conf = state.get("node_models", {}).get("report_style_node", {})
+        provider = node_conf.get("provider") or "google"
+        model_name = node_conf.get("model") or "gemini-2.5-flash"
+        
         llm, callbacks = LLMFactory.create(
-            provider="google",
-            model="gemini-2.5-flash",
+            provider=provider,
+            model=model_name,
             temperature=0,
         )
         
@@ -144,9 +148,13 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
 
     try:
         # LLM Setup
+        node_conf = state.get("node_models", {}).get("report_gen_node", {})
+        provider = node_conf.get("provider") or "google"
+        model_name = node_conf.get("model") or "gemini-2.5-flash"
+        
         llm, callbacks = LLMFactory.create(
-            provider="google",
-            model="gemini-2.5-flash",
+            provider=provider,
+            model=model_name,
             temperature=0.3,
         )
         

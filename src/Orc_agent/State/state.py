@@ -70,6 +70,8 @@ class AgentState(TypedDict):
     file_type: Optional[Literal["tabular", "document"]]
     raw_data: Optional[dict]
     
+    # [NEW] Configuration for LLM Models across nodes
+    node_models: Optional[dict]
 
     user_query: Optional[str]
     
