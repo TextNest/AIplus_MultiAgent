@@ -211,43 +211,47 @@ def render_settings_page():
                 st.rerun()
 
         else:
-            st.warning("⚠️ `.env` 파일에서 API 키를 찾을 수 없습니다. 직접 입력해주세요.")
+            st.warning("⚠️ `.env` 파일에서 API 키를 찾을 수 없습니다. 사용할 모델의 API 키를 입력해주세요.")
             
-            manual_provider = st.selectbox("AI 제공자", ["Google", "OpenAI", "Anthropic"])
-            api_key_input = st.text_input(f"{manual_provider} API Key", type="password")
+            with st.expander("🔑 API 키 직접 입력 (여러 개 입력 가능)", expanded=True):
+                google_key = st.text_input("Google API Key (Gemini)", type="password", help="Google AI Studio에서 발급받은 키")
+                openai_key = st.text_input("OpenAI API Key (ChatGPT)", type="password", help="OpenAI Platform에서 발급받은 키")
+                anthropic_key = st.text_input("Anthropic API Key (Claude)", type="password", help="Anthropic Console에서 발급받은 키")
+                
+            # 기본 대표 모델 선택 (다음 페이지로 넘어가기 위한 용도)
+            st.markdown("---")
+            st.subheader("🎯 기본 주력 모델 설정")
             
-            if manual_provider == "Google":
-                env_key_name = "GOOGLE_API_KEY"
-                prov_key = "google"
-            elif manual_provider == "OpenAI":
-                env_key_name = "OPENAI_API_KEY"
-                prov_key = "openai"
-            else:
-                env_key_name = "ANTHROPIC_API_KEY"
-                prov_key = "anthropic"
+            available_manual = []
+            if google_key: available_manual.append("Google")
+            if openai_key: available_manual.append("OpenAI")
+            if anthropic_key: available_manual.append("Anthropic")
+            
+            if not available_manual:
+                st.info("최소 하나의 API 키를 입력해야 분석을 시작할 수 있습니다.")
+                st.stop()
                 
-            model_options = []
-            if api_key_input:
-                model_options = get_available_models(prov_key, api_key_input)
-            else:
-                if prov_key == "google": model_options = ["gemini-1.5-pro", "gemini-1.5-flash", "gemma-3-27b-it"]
-                elif prov_key == "openai": model_options = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
-                elif prov_key == "anthropic": model_options = ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"]
+            manual_provider = st.selectbox("기본 제공자 선택", available_manual)
+            
+            prov_key_map = {"Google": "google", "OpenAI": "openai", "Anthropic": "anthropic"}
+            curr_prov_key = prov_key_map[manual_provider]
+            curr_api_key = google_key if curr_prov_key == "google" else (openai_key if curr_prov_key == "openai" else anthropic_key)
+            
+            model_options = get_available_models(curr_prov_key, curr_api_key)
+            manual_model = st.selectbox("기본 모델 선택", model_options)
                 
-            manual_model = st.selectbox("모델", model_options)
-                
-            save_to_env = st.checkbox("앱의 `.env` 환경 변수로 임시 적용 (세션 동안 유지)")
+            save_to_env = st.checkbox("보안 주의: 이번 세션 동안 브라우저에 키 유지",value=True)
             
             if st.button("다음 (에이전트별 모델 설정) ➡️", type="primary"):
-                if not api_key_input:
-                    st.error("API 키를 입력해주세요.")
-                else:
-                    if save_to_env:
-                        os.environ[env_key_name] = api_key_input
-                    st.session_state.selected_provider = prov_key
-                    st.session_state.selected_model = manual_model
-                    st.session_state.page = "settings_node"
-                    st.rerun()
+                # 입력된 모든 키를 환경 변수에 주입
+                if google_key: os.environ["GOOGLE_API_KEY"] = google_key
+                if openai_key: os.environ["OPENAI_API_KEY"] = openai_key
+                if anthropic_key: os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+                
+                st.session_state.selected_provider = curr_prov_key
+                st.session_state.selected_model = manual_model
+                st.session_state.page = "settings_node"
+                st.rerun()
 
 # === [NEW] 에이전트 노드별 모델 매핑 페이지 렌더링 ===
 def render_node_settings_page():
