@@ -470,6 +470,8 @@ def handle_main_feedback(action, text, format_choice, style_choice):
         st.session_state.is_running = False
         st.session_state.resume_mode = False
         st.session_state.resume_target = None
+        st.session_state.selected_style = style_choice
+        st.session_state.selected_format = format_choice
         st.balloons()
         st.rerun()
         return
@@ -643,6 +645,14 @@ def render_download_buttons():
     }
     
     # 좌측 컬럼용 수직 레이아웃
+
+    # 사용자가 선택했던 옵션 정보 표시 (세션에 있을 경우만)
+    if "selected_style" in st.session_state and "selected_format" in st.session_state:
+        style = st.session_state.selected_style
+        formats = ", ".join(st.session_state.selected_format)
+        
+        # 안내 문구를 예쁘게 박스(info) 형태로 출력
+        st.info(f"최종 보고서가 **[{style}]** 형식에 맞추어 작성되었으며, 요청하신 **[{formats}]** 포맷으로 다운로드 가능합니다.")
     
     # (1) Markdown 다운로드 (항상 가능)
     if st.session_state.final_report:

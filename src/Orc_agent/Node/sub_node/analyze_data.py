@@ -1,4 +1,3 @@
-
 import re
 import pandas as pd
 from ...State.state import analyzeState
@@ -123,6 +122,69 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
 
         font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
 
+# 기존 header
+# import pandas as pd
+# import numpy as np
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import os
+# import platform
+# import matplotlib.font_manager as fm
+# from matplotlib import font_manager
+
+# # 1. 시스템 폰트 찾기 (실제 설치된 폰트 확인)
+# def get_korean_font():
+#     font_list = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
+    
+#     # 우선순위별 한글 폰트
+#     preferred_fonts = [
+#         'Malgun Gothic', 'NanumGothic', 'NanumBarunGothic', 
+#         'AppleGothic', 'Apple SD Gothic Neo',
+#         'Noto Sans KR', 'Noto Sans CJK KR',
+#         'DejaVu Sans'  # fallback
+#     ]
+    
+#     for pref_font in preferred_fonts:
+#         for font_path in font_list:
+#             font_name = fm.FontProperties(fname=font_path).get_name()
+#             if pref_font.lower() in font_name.lower():
+#                 return pref_font
+    
+#     # 아무 한글 폰트나 찾기
+#     for font_path in font_list:
+#         font_name = fm.FontProperties(fname=font_path).get_name()
+#         if any(keyword in font_name.lower() for keyword in ['gothic', 'nanum', 'malgun', 'apple']):
+#             return font_name
+    
+#     return 'DejaVu Sans'  # 최종 fallback
+
+# korean_font = get_korean_font()
+
+# # 2. Matplotlib 전역 설정 (강제)
+# plt.rcParams.update({{
+#     'font.family': korean_font,
+#     'font.sans-serif': [korean_font, 'DejaVu Sans'],
+#     'axes.unicode_minus': False,
+#     'figure.autolayout': True
+# }})
+
+# # 3. Seaborn 설정 (폰트 설정 후에)
+# try:
+#     sns.set_style("whitegrid")
+#     sns.set_context("notebook")
+#     # Seaborn이 폰트를 덮어쓰지 않도록 재설정
+#     sns.set(font=korean_font, rc={{'font.family': korean_font}})
+# except:
+#     pass
+
+# # 4. 폰트 캐시 무효화 (필요시)
+# try:
+#     fm._rebuild()
+# except:
+#     pass
+
+# print(f"사용 중인 한글 폰트: {{korean_font}}")
+
         header = f"""
 import pandas as pd
 import numpy as np
@@ -132,59 +194,31 @@ import os
 import platform
 import matplotlib.font_manager as fm
 from matplotlib import font_manager
-
-# 1. 시스템 폰트 찾기 (실제 설치된 폰트 확인)
-def get_korean_font():
-    font_list = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
-    
-    # 우선순위별 한글 폰트
-    preferred_fonts = [
-        'Malgun Gothic', 'NanumGothic', 'NanumBarunGothic', 
-        'AppleGothic', 'Apple SD Gothic Neo',
-        'Noto Sans KR', 'Noto Sans CJK KR',
-        'DejaVu Sans'  # fallback
-    ]
-    
-    for pref_font in preferred_fonts:
-        for font_path in font_list:
-            font_name = fm.FontProperties(fname=font_path).get_name()
-            if pref_font.lower() in font_name.lower():
-                return pref_font
-    
-    # 아무 한글 폰트나 찾기
-    for font_path in font_list:
-        font_name = fm.FontProperties(fname=font_path).get_name()
-        if any(keyword in font_name.lower() for keyword in ['gothic', 'nanum', 'malgun', 'apple']):
-            return font_name
-    
-    return 'DejaVu Sans'  # 최종 fallback
-
-korean_font = get_korean_font()
-
-# 2. Matplotlib 전역 설정 (강제)
-plt.rcParams.update({{
-    'font.family': korean_font,
-    'font.sans-serif': [korean_font, 'DejaVu Sans'],
-    'axes.unicode_minus': False,
-    'figure.autolayout': True
-}})
-
-# 3. Seaborn 설정 (폰트 설정 후에)
+# 1. 시스템에 구애받지 않는 안전한 전역 폰트 경로 잡기
+current_dir = os.getcwd()
+font_path = os.path.join(current_dir, 'fonts', 'NanumGothic.ttf')
+# 윈도우 환경을 대비한 슬래시 처리 (백슬래시 이슈 방지)
+font_path = font_path.replace(os.sep, "/")
+# 2. 폰트 매니저에 폰트 직접 추가 및 이름 가져오기
 try:
+    font_prop = fm.FontProperties(fname=font_path)
+    korean_font = font_prop.get_name()
+    
+    # 3. Matplotlib 전역 설정
+    plt.rcParams.update({{
+        'font.family': korean_font,
+        'axes.unicode_minus': False,
+        'figure.autolayout': True
+    }})
+    
+    # 4. Seaborn 설정
     sns.set_style("whitegrid")
     sns.set_context("notebook")
-    # Seaborn이 폰트를 덮어쓰지 않도록 재설정
     sns.set(font=korean_font, rc={{'font.family': korean_font}})
-except:
-    pass
-
-# 4. 폰트 캐시 무효화 (필요시)
-try:
-    fm._rebuild()
-except:
-    pass
-
-print(f"사용 중인 한글 폰트: {{korean_font}}")
+    
+    print(f"사용 중인 한글 폰트: {{korean_font}}")
+except Exception as e:
+    print(f"폰트 설정 실패 (기본값 사용): {{e}}")
 """
         code = header + "\n" + code
     except Exception as e:

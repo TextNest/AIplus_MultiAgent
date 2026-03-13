@@ -14,7 +14,9 @@ from src.Orc_agent.core.prompts import (
     REPORT_PROMPT_GENERAL, 
     REPORT_PROMPT_DECISION, 
     REPORT_PROMPT_MARKETING,
-    REPORT_STYLE_CLASSIFICATION_PROMPT
+    REPORT_STYLE_CLASSIFICATION_PROMPT,
+    OVERALL_PPT_PROMPT,
+    CHART_PPT_PROMPT
 )
 from ...State.state import ReportState
 
@@ -49,13 +51,18 @@ def report_supervisor(state: ReportState) -> ReportState:
         return fmt in report_format and fmt not in generated_formats
 
     # 1. If Markdown content is missing, generate it first
-    if not final_report:
+    # 먼저 마크다운 변환 계열(pdf, html, markdown)이 하나라도 요청 목록에 있는지 확인
+    needs_markdown_family = any(fmt in ["markdown", "pdf", "html"] for fmt in report_format)
+    # 필요한데 아직 안 만들어졌다면 -> generate_content로 보냄
+    if needs_markdown_family and not final_report:
+        # 보고서 스타일 분류
         # If report style is not decided or set to "AI 자동 판단 (추천)", classify it first
         if not report_style or report_style == "AI 자동 판단 (추천)":
             return {"next_worker": "classify_report_style"}
         return {"next_worker": "generate_content"}
     
     # 2. Check for requested formats that haven't been generated yet
+    # 마크다운이 준비되었거나, 애초에 PPTX만 요청한 경우 순서대로 아직 안 만든 파일들 생성
     if "pdf" in report_format and "pdf" not in generated_formats:
         return {"next_worker": "create_pdf", "generated_formats": ["pdf"]}
         
@@ -229,6 +236,7 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
             "final_report": f"# Error\n\nReport generation failed: {str(e)}",
             "steps_log": [f"[Report] ERROR: {str(e)}"]
         }
+
 @observe(name="create_pdf")
 def create_pdf(state: ReportState) -> ReportState:
     """
@@ -246,8 +254,8 @@ def create_pdf(state: ReportState) -> ReportState:
         html_content = markdown.markdown(markdown_content)
         
         # 1. Font Source (Windows)
-        font_name = "MalgunGothic"
-        system_font_path = r"C:/Windows/Fonts/malgun.ttf"
+        font_name = "NanumGothic"
+        system_font_path = r"./fonts/NanumGothic.ttf"
         
         # 2. Register Font via ReportLab directly
         # This bypasses xhtml2pdf's internal font loading which can cause temp file issues
@@ -295,6 +303,7 @@ def create_pdf(state: ReportState) -> ReportState:
         }
     except Exception as e:
         return {"steps_log": [f"[Report] PDF Generation Error: {str(e)}"]}
+
 @observe(name="create_html")
 def create_html(state: ReportState) -> ReportState:
     """
@@ -319,15 +328,23 @@ def create_html(state: ReportState) -> ReportState:
         }
     except Exception as e:
         return {"steps_log": [f"[Report] HTML Generation Error: {str(e)}"]}
+
 @observe(name="create_pptx")
 def create_pptx(state: ReportState) -> ReportState:
     """
     Generates PowerPoint report.
     """
-    analysis_results = state.get("analysis_results", [])
+    analysis_results = state.get("analysis_results", {})
     figure_list = state.get("figure_list", [])
     
     try:
+        # LLM Setup
+        llm, callbacks = LLMFactory.create(
+            provider="google",
+            model="gemini-2.5-flash",
+            temperature=0.3,
+        )
+
         prs = Presentation()
         
         # Title Slide
@@ -341,29 +358,63 @@ def create_pptx(state: ReportState) -> ReportState:
         
         # Content Slides
         if analysis_results:
+            overall_text_raw = ""
+            chart_insights = {}  # { "figure_0_0.png": "인사이트 전문", ... }
+            for key, value_dict in analysis_results.items():
+                insight_text = value_dict.get("insight", "")
+                
+                # overall로 시작하는 키는 전체 요약용으로
+                if key.startswith("overall"):
+                    overall_text_raw += insight_text + "\n"
+                # 그 외(.png 등)는 개별 차트용으로 분류
+                else:
+                    chart_insights[key] = insight_text
+
+        if overall_text_raw:
+            # LLM 호출
+            prompt = OVERALL_PPT_PROMPT.format(text=overall_text_raw)
+            response = llm.invoke(prompt)
+            summary_bullet_points = response.content.strip()
+            
+            # 슬라이드 생성
             bullet_slide_layout = prs.slide_layouts[1]
             slide = prs.slides.add_slide(bullet_slide_layout)
-            shapes = slide.shapes
-            title_shape = shapes.title
-            body_shape = shapes.placeholders[1]
             
-            title_shape.text = "Analysis Insights"
-            tf = body_shape.text_frame
-            
-            text_content = analysis_results[0].replace("```python", "").replace("```", "")
-            tf.text = text_content[:500] + "..." if len(text_content) > 500 else text_content
+            slide.shapes.title.text = "Executive Summary"
+            tf = slide.placeholders[1].text_frame
+            tf.text = summary_bullet_points
 
-        # Figure Slides
+        
         for fig_path in figure_list:
             if os.path.exists(fig_path):
+                # 1. 이미지 파일명 추출 (예: figure_0_0.png)
+                img_filename = os.path.basename(fig_path)
+                
+                # 2. 딕셔너리에서 해당 차트의 원본 인사이트 가져오기
+                raw_chart_insight = chart_insights.get(img_filename, "")
+                
+                # 3. LLM으로 짧게 요약
+                chart_bullet_points = "요약 정보 없음"
+                if raw_chart_insight:
+                    prompt = CHART_PPT_PROMPT.format(text=raw_chart_insight)
+                    response = llm.invoke(prompt)
+                    chart_bullet_points = response.content.strip()
+                # 4. 슬라이드 레이아웃 설정 (텍스트 + 컨텐츠 레이아웃 추천: 레이아웃 [8])
+                # 또는 빈 레이아웃[6]에 텍스트박스와 그림을 직접 좌표 지정해서 넣기 (직접 지정 예시)
                 blank_slide_layout = prs.slide_layouts[6]
                 slide = prs.slides.add_slide(blank_slide_layout)
                 
-                left = Inches(1)
-                top = Inches(1)
-                height = Inches(5.5)
-                slide.shapes.add_picture(fig_path, left, top, height=height)
-        
+                # (왼쪽) 요약 텍스트 추가
+                # left=0.5, top=1.0, width=4.0, height=5.5 (인치)
+                txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1), Inches(4), Inches(5.5))
+                tf = txBox.text_frame
+                tf.word_wrap = True # 텍스트 안 잘리게 줄바꿈 강제
+                tf.text = f"{img_filename} Analysis:\n\n{chart_bullet_points}"
+                
+                # (오른쪽) 이미지 추가 (비율이 안 깨지도록 위치 조정)
+                # left=4.5, top=1.0, height=5.0 (가로 비율은 자동)
+                slide.shapes.add_picture(fig_path, Inches(4.5), Inches(1), height=Inches(5))
+
         output_path = os.path.join(OUTPUT_DIR, "report.pptx")
         prs.save(output_path)
         
