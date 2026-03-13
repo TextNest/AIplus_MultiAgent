@@ -23,22 +23,31 @@ def file_analyze(sub_app):
         }
     return file_analyze_node
 
-# def preprocessing(sub_app):
-#     def preprocessing_node(state: AgentState, config: RunnableConfig):
-#         sub_input ={
-
-#         }
-#         result = sub_app.invoke(sub_input,config=config)
-#         return{
-#         }
-#     return preprocessing_node
 
 
-@observe(name="preprocessing")
-def preprocessing(state: AgentState, config: RunnableConfig):
-    # 아직 구현 안 됨 (Pass)
-    logger.info("Preprocessing skipped (Not implemented yet)")
-    return {"steps_log": ["Preprocessing skipped (Not implemented yet)"]}
+def preprocessing(sub_app):
+    @observe(name="preprocessing")
+    def preprocessing_node(state: AgentState, config: RunnableConfig):
+        logger.info(">>> [전처리 노드] 서브그래프 시작")
+
+        sub_input = {
+            "file_path": state["file_path"],
+        }
+
+        result = sub_app.invoke(sub_input, config=config)
+
+        clean_file_path = result.get("clean_file_path") or state["file_path"]
+        clean_data      = result.get("clean_data")
+        logs            = result.get("steps_log") or result.get("agent_feedback", [])
+
+        logger.info(f">>> [전처리 노드] 완료: {clean_file_path}")
+
+        return {
+            "clean_data":  clean_data,
+            "file_path":   clean_file_path,
+            "steps_log":   logs,
+        }
+    return preprocessing_node
 
 def analysis(sub_app):
     @observe(name="analysis")
