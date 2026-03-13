@@ -34,6 +34,49 @@ class analyzeState(TypedDict):
 
 
 
+
+
+class preprocessState(TypedDict, total=False):
+    file_path: str
+    raw_dataframe: Any
+    output_format: str
+    cleaned_dataframe: Any 
+    raw_preprocessing_report: dict
+    categorical_standardization_report: dict
+    duplicate_cleanup_report: dict
+    date_integrity_report: dict
+    clean_file_path: Optional[str]
+    data_state_report: dict
+    column_roles: dict
+    role_justifications: dict
+    detected_layers: dict
+    derived_metrics: list
+    derivation_skipped: list
+    reliability_flags: dict
+    cleanup_actions: list
+    funnel_chains: list
+    leakage_analysis: dict
+    share_metrics: list
+    volume_efficiency_flags: list
+    has_time_dimension: bool
+    trend_metrics: list
+    saturation_flags: list
+    objective_notes: dict
+    safety_checks: list
+    anomaly_flags: list
+    reporting_dataframe: Any
+    feature_catalogue: list
+    column_order: list
+    formatted_output: str
+    current_stage: str
+    iteration_count: int
+    error: Optional[str]
+    agent_feedback: Annotated[List[str], merge_logs]
+    steps_log: Annotated[List[str], merge_logs]
+    clean_data: Optional[Dict[str, Any]]
+
+
+
 class ReportState(TypedDict):
     """
     State specifically for the Report Generation Subgraph.
