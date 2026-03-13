@@ -270,6 +270,128 @@ def render_node_settings_page():
             st.rerun()
         return
 
+    # [NEW] 모델 자동 매핑 프리셋 로직
+    def find_best_model(models, keywords):
+        if not models: return None
+        # 1순위: 정확히 일치하는 모델명이 있는지 확인
+        for kw in keywords:
+            for m in models:
+                if kw.lower() == m.lower():
+                    return m
+        
+        # 2순위: 부분 일치(유사한 것)가 있는지 확인
+        for kw in keywords:
+            for m in models:
+                if kw.lower() in m.lower():
+                    return m
+        return models[0] # 없으면 첫 번째
+
+    def apply_preset(preset_type):
+        nodes = ["plan_node", "make_node", "eval_node", "document_node", "report_style_node", "report_gen_node"]
+        
+        # [NEW] 노드별 정교한 매핑 설정 (1순위, 2순위 우선순위 반영)
+        preset_configs = {
+            "openai": {
+                "plan_node": [("openai", ["gpt-5.4","gpt-4o","gpt-5.1"])],
+                "make_node": [("openai", ["gpt-5.4","gpt-5.1"])],
+                "eval_node": [("openai", ["gpt-4o","gpt-5.1"])],
+                "document_node": [("openai", ["gpt-4o","gpt-5.1"])],    
+                "report_style_node": [("openai", ["gpt-4o-mini", "gpt-4o"])],
+                "report_gen_node": [("openai", ["gpt-4o","gpt-5.1"])]
+            },
+            "anthropic": {
+                "plan_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"])],
+                "make_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"])],
+                "eval_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"])],
+                "document_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"])],
+                "report_style_node": [("anthropic", ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"])],
+                "report_gen_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"])]
+            },
+            "google": {
+                "plan_node": [("google", ["pro", "gemini-1.5"])],
+                "make_node": [("google", ["pro", "gemini-1.5"])],
+                "eval_node": [("google", ["pro", "gemini-1.5"])],
+                "document_node": [("google", ["pro", "gemini-1.5"])],
+                "report_style_node": [("google", ["flash", "mini"])],
+                "report_gen_node": [("google", ["pro", "gemini-1.5"])]
+            },
+            "mixed": {
+                # 1순위, 2순위 사업자 순차 매핑 logic
+                "plan_node": [("openai", ["gpt-5.4"]), ("gogole", ["pro", "gemini-1.5"])],
+                "make_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"]),("openai", ["gpt-5.4"])], 
+                "eval_node": [("anthropic", ["claude-sonnet-4-6", "claude-3-5"]), ("openai", ["gpt-5.1"])],
+                "document_node": [("google", ["gemini-3.1-flash-lite-preview", "gemini-1.5"]), ("openai", ["gpt-4o"])],
+                "report_style_node": [("google", ["gemini-2.5-flash-lite", "gemini-2.5-flash"]), ("openai", ["gpt-4o-mini"])],
+                "report_gen_node": [("openai", ["gpt-4o"]), ("google", ["pro", "gemini-1.5"])]
+            }
+        }
+
+        # 제공자 밸류 -> 라벨 역매핑 (selectbox 동기화용)
+        rev_keys = {v: k for k, v in available_keys.items()}
+        config_map = preset_configs.get(preset_type, preset_configs["mixed"])
+
+        for node_key in nodes:
+            # 우선순위 리스트 탐색 (사용 가능한 키가 있는 첫 번째 사업자 선택)
+            pref_list = config_map[node_key]
+            actual_prov_val = None
+            keywords = []
+            
+            for prov_candidate, kws in pref_list:
+                if prov_candidate in available_keys.values():
+                    actual_prov_val = prov_candidate
+                    keywords = kws
+                    break
+            
+            # 만약 우선순위에 있는 사업자 키가 하나도 없으면 (이론상 발생 안함), 가진 것 중 첫 번째 폴백
+            if actual_prov_val is None:
+                actual_prov_val = list(available_keys.values())[0]
+                keywords = ["pro", "gpt-4o", "sonnet"]
+
+            api_key = os.environ.get(f"{actual_prov_val.upper()}_API_KEY")
+            models = get_available_models(actual_prov_val, api_key)
+            best_m = find_best_model(models, keywords)
+
+            # 1. 실제 모델 맵 저장
+            st.session_state.node_models[node_key]["provider"] = actual_prov_val
+            st.session_state.node_models[node_key]["model"] = best_m
+            
+            # 2. UI 위젯 강제 업데이트 (selectbox 동기화)
+            prov_label = rev_keys.get(actual_prov_val)
+            if prov_label:
+                st.session_state[f"{node_key}_prov"] = prov_label
+            if best_m:
+                st.session_state[f"{node_key}_mod"] = best_m
+            
+        st.toast(f"✅ {preset_type.upper()} 프리셋이 가용한 키와 우선순위에 맞춰 매핑되었습니다.")
+        st.rerun()
+
+    st.subheader("🚀 빠른 모델 추천 프리셋")
+    st.caption("버튼 클릭 한 번으로 모든 노드에 가장 적합한 모델을 자동 매핑하고 즉시 시작합니다.")
+    
+    p1, p2, p3, p4 = st.columns(4)
+    
+    # 각 제공자별 키 존재 여부 확인
+    openai_exists = "openai" in available_keys.values()
+    anthropic_exists = "anthropic" in available_keys.values()
+    google_exists = "google" in available_keys.values()
+    mixed_exists = len(available_keys) >= 2
+
+    with p1: 
+        if st.button("✨ OpenAI 최적 조합", use_container_width=True, disabled=not openai_exists, help="OpenAI 키 필요"):
+            apply_preset("openai")
+    with p2:
+        if st.button("🎭 Anthropic 최적 조합", use_container_width=True, disabled=not anthropic_exists, help="Anthropic 키 필요"):
+            apply_preset("anthropic")
+    with p3:
+        if st.button("💎 Google 최적 조합", use_container_width=True, disabled=not google_exists, help="Google 키 필요"):
+            apply_preset("google")
+    with p4:
+        if st.button("🌈 혼합 추천 (Mixed)", type="primary", use_container_width=True, disabled=not mixed_exists, help="2개 이상의 API 키 필요"):
+            apply_preset("mixed")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
+
     # 각 노드별 설정을 받는 UI 생성
     def _render_node_selection(node_key, title, desc, col):
         with col.container(border=True):
