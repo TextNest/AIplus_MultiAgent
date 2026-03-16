@@ -6,6 +6,7 @@ Refactored for 3-Column Layout & HITL Support
 import sys
 import os
 import io
+import glob
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -115,6 +116,15 @@ def main():
                     st.session_state.df_preview = df
             
             if st.button("🚀 분석 시작", type="primary"):
+                # --- [output 폴더 비우기] ---
+                # output 폴더 안의 모든 파일(pdf, pptx, html 등) 찾기
+                files = glob.glob(f"output/{st.session_state.thread_id}/*")
+                for f in files:
+                    try:
+                        os.remove(f) # 하나씩 삭제
+                    except Exception as e:
+                        print(f"삭제 실패: {e}")
+                # ----------------------------------------
                 st.session_state.thread_id = str(uuid.uuid4())
                 st.session_state.is_running = True
                 st.session_state.hitl_active = False
@@ -148,7 +158,7 @@ def main():
                 st.info("생성된 시각화와 인사이트를 검토한 뒤, 보고서 생성을 결정해주세요.")
                 
                 with st.form("main_hitl_form"):
-                    format_choice = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
+                    format_choice = st.multiselect("보고서 파일 형태", ["HTML", "PDF", "PPTX", "DOCX"], default=["HTML"])
                     style_choice = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
                     action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])                
                     feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
@@ -206,43 +216,12 @@ def main():
 
         if report_ready:
             with tabs[2]:
-                render_markdown_with_images(st.session_state.final_report)
+                st.components.v1.html(st.session_state.final_report, height=800, scrolling=True)
 
 
     # === Auto-Run Logic ===
     if st.session_state.is_running:
         run_engine(log_container, graph_placeholder, user_query)
-
-
-def render_markdown_with_images(markdown_text):
-    """
-    Markdown 텍스트 내의 로컬 이미지 경로를 파싱하여 st.image로 렌더링
-    Format: ![alt](path)
-    """
-    import re
-    
-    # 이미지 패턴 찾기: ![alt](path)
-    pattern = r'!\[(.*?)\]\((.*?)\)'
-    parts = re.split(pattern, markdown_text)
-    
-    # parts 구조: [text, alt, path, text, alt, path, ...]
-    # len(parts)는 1 (이미지 없음) 또는 1 + 3*N (N개 이미지)
-    
-    for i in range(0, len(parts), 3):
-        text_segment = parts[i]
-        if text_segment.strip():
-            st.markdown(text_segment)
-        
-        if i + 2 < len(parts):
-            alt_text = parts[i+1]
-            img_path = parts[i+2]
-            
-            # 이미지 경로 정리 (절대 경로 -> 상대 경로 시도 또는 그대로 사용)
-            # Streamlit은 st.image에 로컬 절대 경로를 허용함
-            if os.path.exists(img_path):
-                st.image(img_path, caption=alt_text)
-            else:
-                st.warning(f"이미지를 찾을 수 없습니다: {img_path}")
 
 
 # === 7. 실행 엔진 ===
@@ -456,7 +435,7 @@ def handle_main_feedback(action, text, format_choice, style_choice):
             "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
             "figure_list": values.get("figure_list") or st.session_state.figure_list,
             "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
-            "report_format": format_choice or ["Markdown"],
+            "report_format": format_choice or ["html"],
             "report_style": style_choice,
             "clean_data": values.get("clean_data"),
         }
@@ -631,17 +610,18 @@ def render_visualization_tab():
 
 def render_download_buttons():
     """
-    생성된 보고서 파일(PDF, HTML, PPTX, Markdown) 다운로드 버튼 렌더링
+    생성된 보고서 파일(PDF, HTML, PPTX, DOCX) 다운로드 버튼 렌더링
     """
     st.divider()
     st.subheader("📥 보고서 다운로드")
     
     # 1. 파일 경로 설정 (output 디렉토리 기준)
-    output_dir = "output"
+    output_dir = os.path.join("output", st.session_state.thread_id)
     files = {
-        "PDF 보고서": "report.pdf",
         "HTML 보고서": "report.html",
-        "PPTX 보고서": "report.pptx"
+        "PDF 보고서": "report.pdf",
+        "PPTX 보고서": "report.pptx",
+        "DOCX 보고서": "report.docx"
     }
     
     # 좌측 컬럼용 수직 레이아웃
@@ -657,10 +637,10 @@ def render_download_buttons():
     # (1) Markdown 다운로드 (항상 가능)
     if st.session_state.final_report:
         st.download_button(
-            label="📄 Markdown 다운로드",
+            label="🌐 HTML 다운로드",
             data=st.session_state.final_report,
-            file_name="report.md",
-            mime="text/markdown",
+            file_name="report.html",
+            mime="text/html",
             use_container_width=True
         )
         

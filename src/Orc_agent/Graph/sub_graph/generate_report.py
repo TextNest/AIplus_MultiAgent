@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from ...State.state import ReportState
 from ...Node.sub_node.generate_report import (
-    report_supervisor, classify_report_style, generate_content, create_pdf, create_html, create_pptx
+    report_supervisor, classify_report_style, generate_content, create_pdf, create_docx, create_pptx
 )
 
 def generate_report_graph(CheckPoint=None):
@@ -13,7 +13,7 @@ def generate_report_graph(CheckPoint=None):
     workflow.add_node("classify_report_style", classify_report_style)
     workflow.add_node("generate_content", generate_content)
     workflow.add_node("create_pdf", create_pdf)
-    workflow.add_node("create_html", create_html)
+    workflow.add_node("create_docx", create_docx)
     workflow.add_node("create_pptx", create_pptx)
     
     # 2. Set Entry Point
@@ -23,7 +23,7 @@ def generate_report_graph(CheckPoint=None):
     workflow.add_edge("classify_report_style", "supervisor")
     workflow.add_edge("generate_content", "supervisor")
     workflow.add_edge("create_pdf", "supervisor")
-    workflow.add_edge("create_html", "supervisor")
+    workflow.add_edge("create_docx", "supervisor")
     workflow.add_edge("create_pptx", "supervisor")
     
     # 4. Conditional Edges (Supervisor -> Workers)
@@ -34,7 +34,7 @@ def generate_report_graph(CheckPoint=None):
             "classify_report_style": "classify_report_style",
             "generate_content": "generate_content",
             "create_pdf": "create_pdf",
-            "create_html": "create_html",
+            "create_docx": "create_docx",
             "create_pptx": "create_pptx",
             "FINISH": END
         }

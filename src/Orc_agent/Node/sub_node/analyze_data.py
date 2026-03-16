@@ -63,6 +63,7 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
 
 @observe(name="Make")
 def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
+    thread_id = config["configurable"].get("thread_id")
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
     llm, callbacks = LLMFactory.create('google', 'gemma-3-27b-it')
@@ -79,7 +80,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     else:
         file_path = ""
     current_dir = os.getcwd().replace("\\", "/") 
-    img_dir = f"{current_dir}/img"
+    img_dir = f"{current_dir}/img/{thread_id}"
     prompt = f"""
     분석 계획: {state['plan']}
     데이터 요약: {state['df_summary']}
@@ -92,6 +93,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     - 코드 시작 부분에서 반드시 데이터를 로드하세요: df = pd.read_csv(r'{file_path}') 
     - 설명이나 마크다운(```python ... ```) 없이 오직 파이썬 코드만 출력하세요. 
     - print 구문 사용 하지 마세요
+    
     [이미지 저장 규칙]
     - 시각화가 필요한 경우, 각 그래프를 '{img_dir}/figure_{state.get("roop_back", 0)}_0.png', '{img_dir}/figure_{state.get("roop_back", 0)}_1.png', ... 와 같이 순서대로 저장하세요. ({state.get("make_insight", 0)}은 현재 인사이트 번호입니다.)
     - 반드시 절대경로를 사용하여 저장하세요: plt.savefig(r'{img_dir}/figure_{state.get("roop_back", 0)}_n.png')
@@ -100,6 +102,11 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
     - 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다
     - csv파일은 생성하지마세요.
     - numpy,pandas, matplotlib, seaborn ,koreanize_matplotlib 라이브러리를 사용하세요.
+    
+    [에러 방지 규칙]
+    - 데이터 형변환(예: pd.to_datetime)을 할 때는 반드시 해당 컬럼의 데이터가 실제로 그 형식이 맞을 때만 사용하세요. 'SKU'나 순수 문자열 컬럼을 날짜로 바꾸려고 시도하지 마세요. (errors='coerce' 옵션을 적극 활용하세요)
+    - 사칙연산(더하기, 나누기 등)을 수행할 때는 반드시 pd.to_numeric() 처리를 먼저 하거나, df.select_dtypes(include=[np.number]) 를 사용하여 숫자형 데이터만 있는 컬럼인지 확인한 후에 계산을 수행하세요. 문자열 컬럼으로는 절대 수식 연산을 하지 마세요.
+    - 데이터에 결측치(NaN)나 무한대(inf) 값이 있을 수 있으니, 연산 전후로 dropna() 나 fillna()로 데이터를 정제하는 코드를 포함하세요.
     """
     
     try:
@@ -227,7 +234,8 @@ except Exception as e:
     return {"code": code}
 
 @observe(name="Run")
-def run_code(state:analyzeState)->analyzeState:
+def run_code(state:analyzeState, config: RunnableConfig)->analyzeState:
+    thread_id = config["configurable"].get("thread_id") 
     code = state.get("code","")
     roop = str(state.get("roop_back", 0))
     img_paths = []
@@ -236,7 +244,7 @@ def run_code(state:analyzeState)->analyzeState:
     import os
     
     current_dir = os.getcwd().replace("\\", "/")
-    img_dir = f"{current_dir}/img"
+    img_dir = f"{current_dir}/img/{thread_id}"
     if not os.path.exists(img_dir):
         os.makedirs(img_dir)
     target_pattern = f"{img_dir}/figure_{roop}_*.png"
@@ -341,7 +349,7 @@ class InsightOutput(BaseModel):
 
 @observe(name="Insight")
 def derive_insight_node(state: analyzeState, config: RunnableConfig):
-
+    thread_id = config["configurable"].get("thread_id")
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
     roop = str(state.get("roop_back", 0))
@@ -351,7 +359,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
     import os
     img_paths = []
     current_dir = os.getcwd().replace("\\", "/")
-    img_dir = f"{current_dir}/img"
+    img_dir = f"{current_dir}/img/{thread_id}"
     
     plan = state.get("plan", "")
     df_summary = state.get("df_summary", "")

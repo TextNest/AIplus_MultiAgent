@@ -1,11 +1,11 @@
 import os
 import io
 import pandas as pd
-import markdown
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from xhtml2pdf import pisa
+import docx
 
 from ...core.llm_factory import LLMFactory
 from ...core.observe import langfuse_session, merge_runnable_config, observe
@@ -14,6 +14,7 @@ from src.Orc_agent.core.prompts import (
     REPORT_PROMPT_GENERAL, 
     REPORT_PROMPT_DECISION, 
     REPORT_PROMPT_MARKETING,
+    HTML_WRAPPER_PROMPT,
     REPORT_STYLE_CLASSIFICATION_PROMPT,
     OVERALL_PPT_PROMPT,
     CHART_PPT_PROMPT
@@ -22,11 +23,6 @@ from ...State.state import ReportState
 
 from src.Orc_agent.core.logger import logger
 
-# Ensure output directory exists
-OUTPUT_DIR = "output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-
 from typing import Literal, List
 @observe(name="Supervisor")
 def report_supervisor(state: ReportState) -> ReportState:
@@ -34,7 +30,7 @@ def report_supervisor(state: ReportState) -> ReportState:
     Supervisor node that decides the next step in report generation.
     """
     final_report = state.get("final_report")
-    report_format = state.get("report_format", ["markdown"])
+    report_format = state.get("report_format", ["html"])
     report_style = state.get("report_style")
     logger.info(f"현재 등록된 보고서 형식 : {report_format}, 스타일: {report_style}")
 
@@ -50,11 +46,11 @@ def report_supervisor(state: ReportState) -> ReportState:
     def needs_format(fmt):
         return fmt in report_format and fmt not in generated_formats
 
-    # 1. If Markdown content is missing, generate it first
-    # 먼저 마크다운 변환 계열(pdf, html, markdown)이 하나라도 요청 목록에 있는지 확인
-    needs_markdown_family = any(fmt in ["markdown", "pdf", "html"] for fmt in report_format)
+    # 1. If HTML content is missing, generate it first
+    # 먼저 HTML 변환 계열(pdf, html, docs)이 하나라도 요청 목록에 있는지 확인
+    needs_html_family = any(fmt in ["pdf", "html", "docx"] for fmt in report_format)
     # 필요한데 아직 안 만들어졌다면 -> generate_content로 보냄
-    if needs_markdown_family and not final_report:
+    if needs_html_family and not final_report:
         # 보고서 스타일 분류
         # If report style is not decided or set to "AI 자동 판단 (추천)", classify it first
         if not report_style or report_style == "AI 자동 판단 (추천)":
@@ -66,13 +62,13 @@ def report_supervisor(state: ReportState) -> ReportState:
     if "pdf" in report_format and "pdf" not in generated_formats:
         return {"next_worker": "create_pdf", "generated_formats": ["pdf"]}
         
-    if "html" in report_format and "html" not in generated_formats:
-        return {"next_worker": "create_html", "generated_formats": ["html"]}
+    if "html" in report_format and "docx" not in generated_formats:
+        return {"next_worker": "create_docx", "generated_formats": ["docx"]}
         
     if "pptx" in report_format and "pptx" not in generated_formats:
         return {"next_worker": "create_pptx", "generated_formats": ["pptx"]}
         
-    # 3. If all done (or just markdown requested), finish
+    # 3. If all done (or just html requested), finish
     return {"next_worker": "FINISH"}
 
 @observe(name="classify_report_style")
@@ -136,7 +132,7 @@ def classify_report_style(state: ReportState, config: RunnableConfig) -> ReportS
 @observe(name="generate_content")
 def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
     """
-    Generates report content in Markdown format using LLM.
+    Generates report content in HTML format using LLM.
     """
     analysis_results = state.get("analysis_results", {})
     clean_data = state.get("clean_data")
@@ -169,11 +165,12 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
             """
         
         # Visualization Context
-        figure_markdown = ""
+        figure = ""
         if figure_list:
-            figure_markdown = "### Key Visualizations\n"
+            figure = "### Key Visualizations\n"
             for fig in figure_list:
-                figure_markdown += f"![{fig}]({fig})\n"
+                # figure += f"![{fig}]({fig})\n"
+                figure += f"<img src='{fig}' alt='{os.path.basename(fig)}' style='max-width: 100%;'>\n"
         
         # Process Analysis Results
         processed_results = []
@@ -203,12 +200,21 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         }
         selected_style = state.get("report_style", "일반 리포트")
         prompt_template = prompt_map.get(selected_style, REPORT_PROMPT_GENERAL)
-        prompt = prompt_template.format(
+
+        # 1단계: 핵심 지시문
+        core_instructions = prompt_template.format(
             data_summary=data_summary,
             all_results=all_results,
-            figure_markdown=figure_markdown
+            figure=figure
         )
 
+        # 2단계: HTML 껍데기에 핵심 지시문 넣기
+        prompt = HTML_WRAPPER_PROMPT.format(
+            core_instructions=core_instructions,
+            selected_style=selected_style
+        )
+
+        # LLM에게 완성된 프롬프트 전달
         with langfuse_session(session_id="generate-report", tags=["generate_report"]) as lf_metadata:
             invoke_cfg = merge_runnable_config(
                 config,
@@ -228,7 +234,7 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
             
         return {
             "final_report": content,
-            "steps_log": ["[Report] Generated Markdown content via LLM"]
+            "steps_log": ["[Report] Generated content via LLM"]
         }
 
     except Exception as e:
@@ -238,20 +244,20 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         }
 
 @observe(name="create_pdf")
-def create_pdf(state: ReportState) -> ReportState:
+def create_pdf(state: ReportState, config: RunnableConfig) -> ReportState:
     """
-    Converts Markdown report to PDF.
+    Converts HTML report to PDF.
     """
-    markdown_content = state.get("final_report", "")
-    if not markdown_content:
+    thread_id = config["configurable"].get("thread_id", "default")
+    output_dir = os.path.join("output", thread_id)
+    os.makedirs(output_dir, exist_ok=True) # 폴더가 없으면 알아서 생성!
+    content = state.get("final_report", "")
+    if not content:
         return {"steps_log": ["[Report] PDF Generation Skipped (No Content)"]}
         
     try:
-        import markdown
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        
-        html_content = markdown.markdown(markdown_content)
         
         # 1. Font Source (Windows)
         font_name = "NanumGothic"
@@ -285,12 +291,12 @@ def create_pdf(state: ReportState) -> ReportState:
             </style>
         </head>
         <body>
-            {html_content}
+            {content}
         </body>
         </html>
         """
         
-        output_path = os.path.join(OUTPUT_DIR, "report.pdf")
+        output_path = os.path.join(output_dir, "report.pdf")
         with open(output_path, "wb") as f:
             pisa_status = pisa.CreatePDF(styled_html, dest=f, encoding='utf-8')
         
@@ -304,36 +310,51 @@ def create_pdf(state: ReportState) -> ReportState:
     except Exception as e:
         return {"steps_log": [f"[Report] PDF Generation Error: {str(e)}"]}
 
-@observe(name="create_html")
-def create_html(state: ReportState) -> ReportState:
+@observe(name="create_docx")
+def create_docx(state: ReportState, config: RunnableConfig) -> ReportState:
     """
-    Converts Markdown report to HTML.
+    Converts HTML report to Word Document (.docx).
     """
-    markdown_content = state.get("final_report", "")
-    if not markdown_content:
-        return {"steps_log": ["[Report] HTML Generation Skipped (No Content)"]}
+    thread_id = config["configurable"].get("thread_id", "default")
+    output_dir = os.path.join("output", thread_id)
+    os.makedirs(output_dir, exist_ok=True) # 폴더가 없으면 알아서 생성!
+    content_text = state.get("final_report", "")
+    if not content_text:
+        return {"steps_log": ["[Report] DOCX Generation Skipped (No Content)"]}
         
     try:
-        html_content = markdown.markdown(markdown_content)
-        # Add basic styling
-        styled_html = f"<html><body><style>body {{ font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }} img {{ max-width: 100%; }}</style>{html_content}</body></html>"
+        import docx
+        from bs4 import BeautifulSoup # HTML 파싱을 위해 필요할 수 있습니다.
         
-        output_path = os.path.join(OUTPUT_DIR, "report.html")
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(styled_html)
+        doc = docx.Document()
+        doc.add_heading('Data Analysis Report', 0)
+        
+        # 이미지(figure_list)를 순회하며 워드파일 안에 박아 넣기
+        figure_list = state.get("figure_list", [])
+        doc.add_heading('Visualizations', level=1)
+        for fig_path in figure_list:
+            if os.path.exists(fig_path):
+                doc.add_picture(fig_path, width=docx.shared.Inches(5.0))
+                doc.add_paragraph("\n") # 여백 느낌
+        
+        output_path = os.path.join(output_dir, "report.docx")
+        doc.save(output_path)
             
         return {
-            "steps_log": [f"[Report] Generated HTML report at {output_path}"],
-            "generated_formats":["html"]
+            "steps_log": [f"[Report] Generated Word report at {output_path}"],
+            "generated_formats":["docx"]
         }
     except Exception as e:
-        return {"steps_log": [f"[Report] HTML Generation Error: {str(e)}"]}
+        return {"steps_log": [f"[Report] DOCX Generation Error: {str(e)}"]}
 
 @observe(name="create_pptx")
-def create_pptx(state: ReportState) -> ReportState:
+def create_pptx(state: ReportState, config: RunnableConfig) -> ReportState:
     """
     Generates PowerPoint report.
     """
+    thread_id = config["configurable"].get("thread_id", "default")
+    output_dir = os.path.join("output", thread_id)
+    os.makedirs(output_dir, exist_ok=True) # 폴더가 없으면 알아서 생성!
     analysis_results = state.get("analysis_results", {})
     figure_list = state.get("figure_list", [])
     
@@ -415,7 +436,7 @@ def create_pptx(state: ReportState) -> ReportState:
                 # left=4.5, top=1.0, height=5.0 (가로 비율은 자동)
                 slide.shapes.add_picture(fig_path, Inches(4.5), Inches(1), height=Inches(5))
 
-        output_path = os.path.join(OUTPUT_DIR, "report.pptx")
+        output_path = os.path.join(output_dir, "report.pptx")
         prs.save(output_path)
         
         return {
