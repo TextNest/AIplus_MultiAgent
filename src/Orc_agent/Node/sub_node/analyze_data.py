@@ -13,15 +13,57 @@ from ...core.observe import langfuse_session, merge_runnable_config
 from langchain_core.messages import HumanMessage
 import base64
 import os
+import json
 
 from ...core.observe import observe
 import  matplotlib
 from src.Orc_agent.core.logger import logger
 from src.Orc_agent.core.executor import executor_instance
 
+# --- helper ---
+def _get_metadata_prompt(state: dict) -> str:
+    """전처리 메타데이터(catalogue, roles)를 프롬프트용 텍스트로 변환하는 공통 함수"""
+    catalogue_raw = state.get("feature_catalogue", [])
+    roles_raw = state.get("column_roles", {})
+    prep_report = state.get("formatted_output", "") 
+
+    # 1. 컬럼 역할(Roles) 처리
+    if roles_raw:
+        roles_text = f"  - 컬럼별 마케팅 역할: {json.dumps(roles_raw, ensure_ascii=False)}"
+        roles_instruction = "  * 분석 시 [컬럼별 마케팅 역할]을 참고하여 각 컬럼의 의미(비용, 수익, 세그먼트 등)를 정확히 파악하세요."
+    else:
+        roles_text = "  - 컬럼별 마케킹 역할: (제공된 역할 정보 없음)"
+        roles_instruction = "  * 특별한 역할 정의가 없으므로 컬럼명을 통해 의미를 추론하세요."
+    # 2. 카탈로그(Catalogue) 처리
+    if catalogue_raw:
+        cat_text = f"  - 주요 기능 카탈로그: {json.dumps(catalogue_raw, ensure_ascii=False)}"
+        cat_instruction = "  * [주요 기능 카탈로그]에 정의된 수식과 지표명을 우선적으로 사용하세요."
+    else:
+        cat_text = "  - 주요 기능 카탈로그: (추가된 파생 지표 없음)"
+        cat_instruction = "  * 파생 지표가 없으므로 기본 컬럼들을 조합하여 분석하세요."
+    # 3. 전처리 요약 리포트(formatted_output) 처리
+    if prep_report:
+        prep_text = f"  - 전처리 단계 요약 리포트: {prep_report}"
+        prep_instruction = "  * 위 리포트에서 언급된 데이터 특이사항(결측치, 이상치, 퍼널 분석 결과 등)을 분석의 배경 지식으로 활용하세요."
+    else:
+        prep_text = f"  - 전처리 단계 요약 리포트: (추가된 요약 리포트 없음)"
+        prep_instruction = "  * 요약 리포트가 없으므로 기본 컬럼들을 조합하여 분석하세요."
+    # 4. 하나로 합치기
+    formatted_prompt_string = f"""
+    [전처리 분석 결과]:
+    {roles_text}
+    {cat_text}
+    {prep_text}
+    [분석 지침]:
+    {roles_instruction}
+    {cat_instruction}
+    {prep_instruction}
+    """
+    return formatted_prompt_string
+
 class MakeCodeOutput(BaseModel):
     code:str= Field(description="실행 가능한 파이썬 분석 코드. 설명이나 사족은 절대 포함하지 마세요.")
-    
+
 ## INPUT : "preprocessing_data": 전처리 데이터 파일 경로(안전 제일 주의) , "user_query":사용자 질문,"feed_back":피드백
 
 @observe(name="Plan")
@@ -33,13 +75,16 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
     u_id = config["configurable"].get("user_id")
     s_id = config["configurable"].get("session_id")
     file_path = state.get("preprocessing_data","")
-    df = pd.read_csv(file_path)
+    # df = pd.read_csv(file_path)
+    df = pd.read_parquet(state["preprocessing_data"])
     df_summary = get_df_summary(df)
+    # 추가: 전처리 결과물 연동
+    metadata_context = _get_metadata_prompt(state)
     prompt =  f"""
     당신은 마케팅 데이터 전략가입니다. 제공된 데이터프레임의 요약 정보를 바탕으로 사용자의 질문에 답하기 위한 최적의 분석 시나리오를 설계하고 코드를 작성하세요.
     
- 
     [데이터 정보]: {df_summary}
+    [전처리 분석 결과]: {metadata_context}  
     [사용자 질문]: {state['user_query']}
     [피드백]: {state['feed_back']}
     위 데이터를 바탕으로 분석 계획을 세우세요. 
@@ -87,22 +132,43 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
         file_path = ""
     current_dir = os.getcwd().replace("\\", "/") 
     img_dir = f"{current_dir}/img"
+    # 추가: 전처리 결과물 연동
+    metadata_context = _get_metadata_prompt(state)
     prompt = f"""
     분석 계획: {state['plan']}
     데이터 요약: {state['df_summary']}
+    [전처리 분석 결과]: {metadata_context}
     [데이터 파일 경로]: {file_path}
     {text} 
     위 분석 계획을 확인하고 실행하기 위한 파이썬 코드를 작성하세요. 
     
     [필수]
-    - 변수명 앞에 _df 이렇게 작성하지마세요 추가적인 df가 필요하다면 copy1_df,copy2_df ... 이렇게 작성하세요 절대로 변수명 앞에 _ 사용하지 마세요.
-    - 코드 시작 부분에서 반드시 데이터를 로드하세요: df = pd.read_csv(r'{file_path}') 
+    - 변수명 앞에 _df 이렇게 작성하지 마세요. 추가적인 df가 필요하다면 copy1_df, copy2_df, ...처럼 작성하세요. 절대 변수명 앞에 _ 사용하지 마세요.
+    - 코드 시작 부분에서 반드시 데이터를 로드하세요: df = pd.read_parquet(r'{file_path}') 
     - 설명이나 마크다운(```python ... ```) 없이 오직 파이썬 코드만 출력하세요. 
-    - print 구문 사용 하지 마세요
+
+    - 분석 결과값 출력을 위한 print는 지양하되, 에러 방지 및 데이터 유무 확인을 위한 로그성 print는 허용합니다
+    
+    - 모든 수치 컬럼은 연산(sum, mean 등)을 수행하기 **전**에 반드시 `.fillna(0)`를 먼저 적용하세요.
+    - 예: plot_df = df.fillna(0).groupby('category').sum(numeric_only=True) 
+    - 또는 개별 컬럼: total = df['column'].fillna(0).sum()
+    - 수치 결과값(Scalar)에는 `.fillna()`를 사용할 수 없으므로, 반드시 연산 대상이 되는 Series나 DataFrame 단계에서 미리 결측치를 제거해야 합니다.
+    - 연산 결과가 단일 숫자(scalar)인 경우, 결과값이 np.nan인지 확인하려면 np.isnan(value)을 사용하거나, 계산 전 데이터에서 NaN을 완벽히 제거한 후 연산하세요.
+
+    - 모든 시각화(특히 plt.pie) 실행 전에는 반드시 아래와 같은 '데이터 검증 패턴'을 적용하세요.
+    - 패턴: 
+      if not plot_df.empty and plot_df['수치컬럼'].sum() > 0:
+          # 여기에 그래프 그리기 및 저장 코드 작성
+      else:
+          print(f"{{img_name}}: 시각화할 유효 데이터가 부족하여 생략합니다.")
+    - 시각화(특히 plt.pie)를 하기 전에는 반드시 데이터에 NaN이 있는지 확인하고 .dropna() 또는 .fillna(0) 처리를 하세요.
+    - 데이터프레임이 비어있는지(if df.empty:) 확인하여, 비어있다면 그래프를 그리는 대신 print('데이터가 없어 시각화를 건너뜁니다.')와 같은 로그를 남기고 다음 단계로 넘어가게 하세요.
+
     [이미지 저장 규칙]
     - 시각화가 필요한 경우, 각 그래프를 '{img_dir}/figure_{state.get("roop_back", 0)}_0.png', '{img_dir}/figure_{state.get("roop_back", 0)}_1.png', ... 와 같이 순서대로 저장하세요. ({state.get("make_insight", 0)}은 현재 인사이트 번호입니다.)
     - 반드시 절대경로를 사용하여 저장하세요: plt.savefig(r'{img_dir}/figure_{state.get("roop_back", 0)}_n.png')
     - 한글 폰트 깨짐을 방지하기 위해 'koreanize_matplotlib' 라이브러리가 설치되어 있다고 가정하고 import하세요. 또는 폰트 설정을 직접 하세요.
+    - 모든 시각화 전에는 반드시 데이터프레임이 비어있는지 혹은 수치에 NaN이 포함되어 있는지 체크하여, 오류 없이 실행되도록 방어 코드를 작성하세요.
     
     - 각각의 이미지 파일은 하나의 그래프 또는 표만 들어가야합니다
     - csv파일은 생성하지마세요.
@@ -118,14 +184,24 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
             )
             response = llm.invoke(prompt, config=invoke_cfg)
 
-        code = response.content if hasattr(response, "content") else str(response)
-        if isinstance(code, list):
-            code = "".join([str(part) for part in code])
+        # Content 추출 로직 강화: 리스트 블록인 경우 텍스트만 추출
+        if hasattr(response, "content"):
+            content = response.content
+            if isinstance(content, list):
+                code = "\n".join([part["text"] for part in content if isinstance(part, dict) and part.get("type") == "text"])
+            else:
+                code = str(content)
+        else:
+            code = str(response)
 
+        # Markdown 코드 블록 제거
         if "```" in code:
             match = re.search(r"```(?:python)?\s*(.*?)```", code, re.DOTALL)
             if match:
                 code = match.group(1).strip()
+            else:
+                # 백틱만 잇고 끝나는 경우 대비
+                code = code.replace("```python", "").replace("```", "").strip()
 
         font_name = executor_instance.available_font or 'Malgun Gothic' # Fallback
 
@@ -196,7 +272,7 @@ print(f"사용 중인 한글 폰트: {{korean_font}}")
     except Exception as e:
         return {"now_log": [f"Code Generation Failed: {str(e)}"], "error_roop": state.get("error_roop", 0) + 1}
         
-    return {"code": code}
+    return {"code": code, "now_log": None}
 
 @observe(name="Run")
 def run_code(state:analyzeState)->analyzeState:
@@ -266,10 +342,14 @@ def evaluation_code(state: analyzeState,config:RunnableConfig):
         )
         response = llm.invoke(prompt, config=invoke_cfg)
     
-    if "APPROVE" in response.content:
+    content = response.content if hasattr(response, "content") else str(response)
+    if isinstance(content, list):
+        content = "\n".join([part["text"] for part in content if isinstance(part, dict) and part.get("type") == "text"])
+        
+    if "APPROVE" in content.upper():
         return {"is_approved": True}
     else:
-        return {"is_approved": False, "now_log": [response.content]}
+        return {"is_approved": False, "now_log": [str(content)]}
 
 
 def route_wait_node(state: analyzeState):
@@ -329,6 +409,8 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
     
     plan = state.get("plan", "")
     df_summary = state.get("df_summary", "")
+    # 추가: 전처리 결과물 연동
+    metadata_context = _get_metadata_prompt(state)
     
     # [Fix] 현재 루프에서 생성된 이미지만 로드 (TypeError 해결 & 증분 분석)
     img_paths = sorted(glob.glob(f"{img_dir}/figure_{roop}_*.png"))
@@ -342,6 +424,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
     [분석 배경]
     - 계획: {plan}
     - 데이터 요약 정보: {df_summary}
+    - 전처리 분석 결과: {metadata_context} 
     
     [새로운 시각화 이미지 목록]:
     {[os.path.basename(p) for p in new_img_paths]}
@@ -384,8 +467,6 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
             response = structured_llm.invoke([msg], config=invoke_cfg)
             
         filename_map = {os.path.basename(p): p for p in img_paths}
-        
-        # [Fix] Overall Insight를 병합하지 않고 회차별로 분리하여 저장
         overall_key = f"overall_{roop}"
         
         final_insight = {
@@ -397,32 +478,44 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
         
         for item in response.image_specific_insights:
             full_path = filename_map.get(item.img_name, None)
-            
             final_insight[item.img_name] = {
                 "insight": item.insight,
                 "img_path": full_path
             }
                 
     except Exception as e:
-        print(f"Structured Output Failed: {e}. Fallback to text.")
+        logger.warning(f">>> [Insight] Structured Output Failed: {e}. Fallback to plain text.")
         node_conf = state.get("node_models", {}).get("eval_node", {})
         provider = node_conf.get("provider") or "google"
         model_name = node_conf.get("model") or "gemma-3-27b-it"
         llm, callbacks = LLMFactory.create(provider, model_name, temperature=0.3)
+        
+        # Fallback prompt for better parsing
+        # HumanMessage.content가 리스트(이미지 포함)이므로 텍스트 파트만 합쳐서 프롬프트 생성
+        text_parts = [p["text"] for p in msg.content if isinstance(p, dict) and p.get("type") == "text"]
+        fallback_prompt = "\n".join(text_parts) + "\n\n각 이미지별 분석은 '### [이미지파일명]'으로 시작하는 섹션으로 구분해서 작성해 주세요."
+        
         with langfuse_session(session_id=s_id, user_id=u_id) as lf_metadata:
             invoke_cfg = merge_runnable_config(
                 config,
                 callbacks=callbacks,
                 metadata=lf_metadata,
             )
-            plain_response = llm.invoke([msg], config=invoke_cfg)
+            plain_response = llm.invoke(fallback_prompt, config=invoke_cfg)
+            content = plain_response.content if hasattr(plain_response, 'content') else str(plain_response)
             
         overall_key = f"overall_{roop}"
-        final_insight = {
-            overall_key: {
-                "insight": plain_response.content,
-                "img_path": None
-            }
-        }
+        final_insight = {overall_key: {"insight": content, "img_path": None}}
+        
+        # Simple parsing for fallback
+        filename_map = {os.path.basename(p): p for p in img_paths}
+        for filename, full_path in filename_map.items():
+            pattern = rf"### \[{re.escape(filename)}\](.*?)(?=### \[|$)"
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            if match:
+                final_insight[filename] = {
+                    "insight": match.group(1).strip(),
+                    "img_path": full_path
+                }
 
     return {"final_insight": final_insight}

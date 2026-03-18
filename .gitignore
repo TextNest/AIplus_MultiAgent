@@ -225,3 +225,4 @@ test/test_app_mock.py
 *streamlit_log*
 temp_*.csv
 nul
+tmp/

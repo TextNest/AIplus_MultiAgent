@@ -407,12 +407,22 @@ def render_node_settings_page():
             models = get_available_models(prov_val, api_key)
             
             # 모델 선택 (이전 페이지에서 선택된 기본 모델이 있다면 기본값으로 세팅 시도)
-            default_index = 0
-            if models and st.session_state.selected_model in models:
-                default_index = models.index(st.session_state.selected_model)
+            # default_index = 0
+            # if models and st.session_state.selected_model in models:
+            #     default_index = models.index(st.session_state.selected_model)
                 
-            model_val = st.selectbox(f"모델 ({title})", models, index=default_index, key=f"{node_key}_mod")
+            # model_val = st.selectbox(f"모델 ({title})", models, index=default_index, key=f"{node_key}_mod")
             
+            # 위젯 key에 해당하는 값이 아직 세션에 없다면(초기 렌더링), 논리적으로 구한 기본값을 세션에 세팅해 줍니다.
+            if f"{node_key}_mod" not in st.session_state:
+                if models and st.session_state.selected_model in models:
+                    st.session_state[f"{node_key}_mod"] = st.session_state.selected_model
+                elif models:
+                    st.session_state[f"{node_key}_mod"] = models[0] # 아무것도 없으면 첫 번째 값
+                    
+            # ⚠️ 핵심: selectbox 안 index 파라미터를 완전히 제거 → Streamlit이 알아서 위젯 key에 들어있는 값을 읽어와서 화면에 표출
+            model_val = st.selectbox(f"모델 ({title})", models, key=f"{node_key}_mod")
+
             # State 저장
             st.session_state.node_models[node_key]["provider"] = prov_val
             st.session_state.node_models[node_key]["model"] = model_val
@@ -461,9 +471,11 @@ def main_dashboard():
             if uploaded_file:
                 # 파일 저장 및 세션 업데이트
                 if st.session_state.uploaded_file_path is None or uploaded_file.name != os.path.basename(st.session_state.uploaded_file_path):
-                    file_path = f"temp_{uploaded_file.name}" 
+                    # file_path = f"temp_{uploaded_file.name}" 
+                    thread_dir = f"tmp/{st.session_state.thread_id}"
+                    os.makedirs(thread_dir, exist_ok=True)
+                    file_path = os.path.join(thread_dir, uploaded_file.name)
     
-     
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     
@@ -472,9 +484,10 @@ def main_dashboard():
                     # 미리보기 데이터 로드
                     df = pd.read_csv(file_path)
                     st.session_state.df_preview = df
+
+                    st.rerun()
             
             if st.button("🚀 분석 시작", type="primary"):
-                st.session_state.thread_id = str(uuid.uuid4())
                 st.session_state.is_running = True
                 st.session_state.hitl_active = False
                 st.session_state.hitl_type = None

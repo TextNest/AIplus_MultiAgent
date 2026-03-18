@@ -34,11 +34,35 @@ def file_analyze(sub_app):
 #     return preprocessing_node
 
 
-@observe(name="preprocessing")
-def preprocessing(state: AgentState, config: RunnableConfig):
-    # 아직 구현 안 됨 (Pass)
-    logger.info("Preprocessing skipped (Not implemented yet)")
-    return {"steps_log": ["Preprocessing skipped (Not implemented yet)"]}
+def preprocessing(sub_app):
+    @observe(name="preprocessing")
+    def preprocessing_node(state: AgentState, config: RunnableConfig):
+        logger.info(f">>> [전처리 노드] 서브그래프 실행 중...")
+        
+        # 1. Main AgentState에서 preprocessState로 넘겨줄 입력값 구성
+        sub_input = {
+            "file_path": state.get("file_path", ""),
+            "node_models": state.get("node_models", {})
+            # 만약 메인 state.py의 AgentState에 다른 초기값이 있다면 여기에 추가로 매핑하기
+        }
+        
+        # 2. 서브그래프(preprocess graph) 실행
+        result = sub_app.invoke(sub_input, config=config)
+        
+        logger.info(f">>> [전처리 노드] 서브그래프 실행 완료.")
+        
+        # 3. 서브그래프의 결과(preprocessState)를 다시 Main AgentState에 맞게 매핑하여 반환
+        return {
+            # 예시: 서브그래프 내부의 로그를 메인의 steps_log에 병합
+            "steps_log": result.get("steps_log", []),
+            "clean_data": result.get("working_df_path"),
+            # 추가: 전처리 결과물 연동
+            "feature_catalogue": result.get("feature_catalogue"),
+            "column_roles": result.get("column_roles"),
+            "formatted_output": result.get("formatted_output")
+        }
+        
+    return preprocessing_node
 
 def analysis(sub_app):
     @observe(name="analysis")
@@ -74,10 +98,14 @@ def analysis(sub_app):
         else:
             logger.info(f">>> [분석 노드] 새로운 서브그래프 시작")
             sub_input = {
-                "preprocessing_data": state["file_path"],
+                # "preprocessing_data": state.get("clean_data", {}).get("data_json") if state.get("clean_data") else state["file_path"], 
+                "preprocessing_data": state.get("clean_data") if state.get("clean_data") else state["file_path"],
                 "user_query": state["user_query"],
                 "feed_back": [state.get("feed_back","")] if state.get("feed_back") else [],
-                "node_models": state.get("node_models", {})
+                "node_models": state.get("node_models", {}),
+                # 추가: 전처리 결과물 연동
+                "feature_catalogue": state.get("feature_catalogue"),
+                "column_roles": state.get("column_roles")
             }
             
             for chunk in sub_app.stream(sub_input, config=sub_config, stream_mode="values"):
@@ -120,7 +148,9 @@ def final_report(sub_app):
             "file_path": state.get("file_path", ""),
             "report_format": state.get("report_type", ["markdown"]),
             "clean_data": state.get("clean_data"),
-            "node_models": state.get("node_models", {})
+            "node_models": state.get("node_models", {}),
+            # 추가: 전처리 결과물 연동
+            "formatted_output": state.get("formatted_output")
         }
 
         logger.info(f">>> [최종리포트 노드] 서브그래프 상태 확인 중...")

@@ -136,7 +136,6 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
     Generates report content in Markdown format using LLM.
     """
     analysis_results = state.get("analysis_results", {})
-    clean_data = state.get("clean_data")
     file_path = state.get("file_path", "Data")
     figure_list = state.get("figure_list", [])
     
@@ -159,15 +158,7 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         )
         
         # Data Context
-        data_summary = ""
-        if clean_data:
-            df = pd.DataFrame(clean_data)
-            data_summary = f"""
-            - Data Source: {file_path}
-            - Rows: {len(df):,}
-            - Columns: {len(df.columns)}
-            - Column List: {', '.join(df.columns)}
-            """
+        data_summary = state.get("formatted_output", "")
         
         # Visualization Context
         figure_markdown = ""
