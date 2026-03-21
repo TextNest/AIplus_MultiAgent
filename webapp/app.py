@@ -6,8 +6,29 @@ Refactored for 3-Column Layout & HITL Support
 import sys
 import os
 import io
+import glob
 from pathlib import Path
 from dotenv import load_dotenv
+import shutil
+
+class SessionCleanup:
+    def __init__(self, thread_id):
+        self.thread_id = thread_id
+        
+    def __del__(self):
+        # 브라우저 종료 등으로 세션 메모리가 해제될 때 자동 실행
+        import os
+        import shutil
+
+        target_dirs = [
+            f"tmp/{self.thread_id}", 
+            f"output/{self.thread_id}", 
+            f"img/{self.thread_id}_sub"
+        ]
+        for path in target_dirs:
+            if os.path.exists(path):
+                shutil.rmtree(path, ignore_errors=True) # 폴더 안의 모든 내용물과 폴더 자체를 완전 파기
+                print(f"[보안] 세션 종료 감지: {path} 폴더 영구 파기 완료")
 
 # === 1. 환경 설정 및 경로 추가 ===
 project_root = Path(__file__).parent.parent
@@ -97,6 +118,12 @@ def init_session():
         st.session_state.resume_mode = False
     if "resume_target" not in st.session_state:
         st.session_state.resume_target = None
+    if "show_model_error" not in st.session_state:
+        st.session_state.show_model_error = False
+
+    # 예기치 못한 종료 상황에서 임시 파일 자동 삭제
+    if "cleanup_hook" not in st.session_state:
+        st.session_state.cleanup_hook = SessionCleanup(st.session_state.thread_id)
 
 init_session()
 
@@ -256,6 +283,14 @@ def render_settings_page():
 # === [NEW] 에이전트 노드별 모델 매핑 페이지 렌더링 ===
 def render_node_settings_page():
     st.title("🧩 에이전트별 모델 매핑")
+    
+    # === 토스트 알림 로직 추가 ===
+    # 스위치가 켜져(True) 있으면 토스트 알림을 띄운 뒤 스위치를 끄고(False) 다음부터는 안 띄움
+    if st.session_state.get("show_model_error", False):
+        # 화면 가장 윗부분에 눈에 띄게 빨간 불 토스트를 띄웁니다.
+        st.toast("아래 '🚀 빠른 모델 추천 프리셋'에서 버튼을 눌러 고지능 모델로 자동 세팅해 보세요!", icon="🔥")
+        st.session_state.show_model_error = False  # 알림 표시 후 스위치 끄기
+
     st.markdown("전체 오케스트레이션을 담당하는 **메인 그래프**와 각 특정 역할을 수행하는 **서브 그래프**들에 개별적으로 LLM 모델을 할당할 수 있습니다.")
 
     available_keys = {}
@@ -455,6 +490,28 @@ def render_node_settings_page():
 
 # === 6. UI 레이아웃 구성 ===
 def main_dashboard():
+    # === [버튼형 에러 팝업 로직] ===
+    if st.session_state.get("show_model_error", False):
+        st.error("🚨 복잡한 추론 실패! 현재 선택하신 모델(Gemma, Mini 등)의 지능이 부족합니다.")
+        
+        # 눈에 띄게 큰 테두리 박스(컨테이너) 하나를 화면 중앙 상단에 던져주기
+        with st.container(border=True):
+            st.warning("소형 모델은 파이썬 코드 작성 및 논리적 한계로 무한 루프에 빠질 위험이 큽니다. 고능능 모델(Flash, Pro 등)로 짝을 지어 권장 프리셋을 활용해 보세요.")
+            
+            # 여기서 클릭 전까지 화면은 영원히 멈춰 대기합니다!
+            if st.button("⬅️ 모델 다시 선택하러 가기", type="primary"):
+                # 버튼을 누르면 스위치 끄고 셋팅 화면으로 이동
+                st.session_state.show_model_error = False
+                st.session_state.page = "settings_node"
+
+                # 세팅 페이지 도착 시 토스트 알림을 띄우기 위한 스위치 ON
+                st.session_state.show_model_error = True
+                st.rerun()
+        
+        # 버튼을 누르기 전까지는 혹시 모를 배경 화면이 보이지 않도록 함수를 멈추기(return)
+        return
+    # ===========================
+
     # 3단 컬럼 구성 (좌: 1, 중: 2, 우: 1)
     col_left, col_center, col_right = st.columns([1, 2, 1])
 
@@ -488,6 +545,15 @@ def main_dashboard():
                     st.rerun()
             
             if st.button("🚀 분석 시작", type="primary"):
+                # === [폴더 비우기] ===
+                target_dirs = [
+                            f"output/{st.session_state.thread_id}", 
+                            f"img/{st.session_state.thread_id}_sub"
+                        ]
+                for path in target_dirs:
+                    if os.path.exists(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                # ===========================
                 st.session_state.is_running = True
                 st.session_state.hitl_active = False
                 st.session_state.hitl_type = None
@@ -506,7 +572,7 @@ def main_dashboard():
                 st.error("🛑 서브 에이전트 피드백 요청")
                 st.info("분석 과정에서 사람의 확인이 필요합니다.")
                 
-                with st.form("sub_hitl_form"):
+                with st.form("sub_hitl_form", clear_on_submit=True):
                     action = st.radio("행동 선택", ["완료 (Approve)", "수정 (Modify)", "추가 (Add)"])
                     feedback_text = st.text_area("피드백 내용", placeholder="수정 또는 추가 시 내용을 입력하세요.")
                     
@@ -520,13 +586,18 @@ def main_dashboard():
                 st.info("생성된 시각화와 인사이트를 검토한 뒤, 보고서 생성을 결정해주세요.")
                 
                 with st.form("main_hitl_form"):
-                    format_choice = st.multiselect("보고서 파일 형태", ["Markdown", "PDF", "PPTX", "HTML"], default=["Markdown"])
+                    format_choice = st.multiselect("보고서 파일 형태", ["HTML", "PDF", "PPTX", "DOCX"], default=["HTML"])
                     style_choice = st.selectbox("보고서 유형 선택", ["AI 자동 판단 (추천)", "일반 리포트", "의사 결정 리포트", "마케팅 예산 분배 리포트"], index=0)
-                    action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])                
-                    feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
+                    # action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])                
+                    # feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
                     
-                    if st.form_submit_button("결정 전송"):
-                        handle_main_feedback(action, feedback_text, format_choice, style_choice)
+                    if st.form_submit_button("보고서 생성 및 다운로드 (Approve)", type="primary"):
+                        # handle_main_feedback(action, feedback_text, format_choice, style_choice)
+                        st.session_state.is_rendering_report = True
+                        st.session_state.format_choice = format_choice
+                        st.session_state.style_choice = style_choice
+                        # 메인 루프로 빠져나가기 위해 새로고침 명령을 던짐
+                        st.rerun()
 
         # 4. 로그 출력 (간단히)
         with st.expander("📝 실행 로그", expanded=True):
@@ -554,68 +625,111 @@ def main_dashboard():
 
 
     # --- [Center Column] 결과 디스플레이 ---
+    # with col_center:
+    #     st.subheader("📊 분석 결과 및 보고서")
+
+    #     report_ready = bool(st.session_state.final_report)
+    #     tabs = st.tabs(
+    #         ["📋 데이터 미리보기", "💡 시각화 및 인사이트", "📄 최종 보고서"]
+    #         if report_ready
+    #         else ["📋 데이터 미리보기", "💡 시각화 및 인사이트"]
+    #     )
+
+    #     with tabs[0]:
+    #         if st.session_state.df_preview is not None:
+    #             st.dataframe(st.session_state.df_preview.head(20), width='stretch')
+    #         else:
+    #             st.info("파일을 업로드하면 데이터가 표시됩니다.")
+
+    #     with tabs[1]:
+    #         render_visualization_tab()
+
+    #         if st.session_state.analysis_results and not report_ready:
+    #             st.caption("분석 피드백이 완료되면 최종 보고서 탭이 나타납니다.")
+
+    #     if report_ready:
+    #         with tabs[2]:
+    #             render_markdown_with_images(st.session_state.final_report)
+
+
+    # --- [Center Column] 결과 디스플레이 ---
     with col_center:
         st.subheader("📊 분석 결과 및 보고서")
 
         report_ready = bool(st.session_state.final_report)
-        tabs = st.tabs(
-            ["📋 데이터 미리보기", "💡 시각화 및 인사이트", "📄 최종 보고서"]
-            if report_ready
-            else ["📋 데이터 미리보기", "💡 시각화 및 인사이트"]
-        )
 
-        with tabs[0]:
+        is_sub_waiting = st.session_state.hitl_active and st.session_state.hitl_type == "sub"
+        has_snapshot_data = is_sub_waiting and st.session_state.hitl_snapshot and st.session_state.hitl_snapshot.get("final_insight")
+        
+        # 1. 진행 상태에 따라 '가장 처음에 보여주고 싶은 탭'을 배열의 맨 앞으로 꺼내기
+        if report_ready:
+            # 보고서 완성 직후: 1순위 보고서, 2순위 시각화
+            tabs_list = ["📄 최종 보고서", "💡 시각화 및 인사이트", "📋 데이터 미리보기"]
+        elif st.session_state.analysis_results or has_snapshot_data:
+            # 분석 대기 상태(메인 분석이 끝났거나(or) 피드백 대기하며 들고 있는 데이터가 있다면): 1순위 시각화, 2순위 데이터
+            tabs_list = ["💡 시각화 및 인사이트", "📋 데이터 미리보기"]
+        else:
+            # 완전 초기 상태: 1순위 데이터
+            tabs_list = ["📋 데이터 미리보기", "💡 시각화 및 인사이트"]
+            
+        # 2. 결정된 순서대로 탭(Tab) 객체 생성
+        tabs = st.tabs(tabs_list)
+        
+        # 3. [핵심 마법] 탭 순서가 어떻게 바뀌든, 이름으로 탭을 찾을 수 있게 연결고리(딕셔너리) 생성
+        tab_dict = dict(zip(tabs_list, tabs))
+        
+        # 4. 이제 기존처럼 tabs[0], tabs[1] 숫자 안 쓰고 이름으로 부르기
+        with tab_dict["📋 데이터 미리보기"]:
             if st.session_state.df_preview is not None:
                 st.dataframe(st.session_state.df_preview.head(20), width='stretch')
             else:
                 st.info("파일을 업로드하면 데이터가 표시됩니다.")
 
-        with tabs[1]:
+        with tab_dict["💡 시각화 및 인사이트"]:
             render_visualization_tab()
-
             if st.session_state.analysis_results and not report_ready:
                 st.caption("분석 피드백이 완료되면 최종 보고서 탭이 나타납니다.")
 
         if report_ready:
-            with tabs[2]:
-                render_markdown_with_images(st.session_state.final_report)
-
+            with tab_dict["📄 최종 보고서"]:
+                st.components.v1.html(st.session_state.final_report, height=800, scrolling=True)
 
     # === Auto-Run Logic ===
     if st.session_state.is_running:
         run_engine(log_container, graph_placeholder, user_query)
 
 
-def render_markdown_with_images(markdown_text):
-    """
-    Markdown 텍스트 내의 로컬 이미지 경로를 파싱하여 st.image로 렌더링
-    Format: ![alt](path)
-    """
-    import re
+# def render_markdown_with_images(markdown_text):
+#     """
+#     Markdown 텍스트 내의 로컬 이미지 경로를 파싱하여 st.image로 렌더링
+#     Format: ![alt](path)
+#     """
+#     import re
     
-    # 이미지 패턴 찾기: ![alt](path)
-    pattern = r'!\[(.*?)\]\((.*?)\)'
-    parts = re.split(pattern, markdown_text)
+#     # 이미지 패턴 찾기: ![alt](path)
+#     pattern = r'!\[(.*?)\]\((.*?)\)'
+#     parts = re.split(pattern, markdown_text)
     
-    # parts 구조: [text, alt, path, text, alt, path, ...]
-    # len(parts)는 1 (이미지 없음) 또는 1 + 3*N (N개 이미지)
+#     # parts 구조: [text, alt, path, text, alt, path, ...]
+#     # len(parts)는 1 (이미지 없음) 또는 1 + 3*N (N개 이미지)
     
-    for i in range(0, len(parts), 3):
-        text_segment = parts[i]
-        if text_segment.strip():
-            st.markdown(text_segment)
+#     for i in range(0, len(parts), 3):
+#         text_segment = parts[i]
+#         if text_segment.strip():
+#             st.markdown(text_segment)
         
-        if i + 2 < len(parts):
-            alt_text = parts[i+1]
-            img_path = parts[i+2]
+#         if i + 2 < len(parts):
+#             alt_text = parts[i+1]
+#             img_path = parts[i+2]
             
-            # 이미지 경로 정리 (절대 경로 -> 상대 경로 시도 또는 그대로 사용)
-            # Streamlit은 st.image에 로컬 절대 경로를 허용함
-            if os.path.exists(img_path):
-                st.image(img_path, caption=alt_text)
-            else:
-                st.warning(f"이미지를 찾을 수 없습니다: {img_path}")
-
+#             # 이미지 경로 정리 (절대 경로 -> 상대 경로 시도 또는 그대로 사용)
+#             # Streamlit은 st.image에 로컬 절대 경로를 허용함
+#             if os.path.exists(img_path):
+#                 st.image(img_path, caption=alt_text)
+#             else:
+#                 st.warning(f"이미지를 찾을 수 없습니다: {img_path}")
+    if st.session_state.get("is_rendering_report", False):
+        run_report_engine(log_container, graph_placeholder)
 
 # === 7. 실행 엔진 ===
 def run_engine(log_container, graph_placeholder, user_query):
@@ -782,6 +896,10 @@ def run_engine(log_container, graph_placeholder, user_query):
                 "실사용 가능한 API 키를 `.env`에 설정한 뒤 다시 시도해주세요."
             )
             st.session_state.is_running = False
+        elif "recursion limit" in error_msg or "retry" in error_msg or "3회 연속 실패" in error_msg:
+            st.session_state.is_running = False
+            st.session_state.show_model_error = True  # <--- 스위치 ON!
+            st.rerun()
         else:
             st.error(f"실행 중 오류 발생: {e}")
             st.session_state.is_running = False
@@ -811,52 +929,122 @@ def handle_sub_feedback(action, text):
     st.session_state.resume_target = "sub"
     st.rerun()
 
-def handle_main_feedback(action, text, format_choice, style_choice):
-    graph, sub_apps = get_graph()
+# def handle_main_feedback(action, text, format_choice, style_choice):
+#     graph, sub_apps = get_graph()
     
+#     config: RunnableConfig = {
+#         "configurable": {"thread_id": st.session_state.thread_id}
+#     }
+    
+#     val = "APPROVE" if "Approve" in action else "REJECT"
+
+#     if val == "APPROVE":
+#         snapshot = graph.get_state(config)
+#         values = snapshot.values if hasattr(snapshot, "values") else {}
+#         report_app = sub_apps["report"]
+
+#         sub_input = {
+#             "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
+#             "figure_list": values.get("figure_list") or st.session_state.figure_list,
+#             "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
+#             "report_format": format_choice or ["html"],
+#             "report_style": style_choice,
+#             "clean_data": values.get("clean_data"),
+#         }
+
+#         result = report_app.invoke(sub_input, config=config)
+#         final_report = result.get("final_report", "")
+
+#         actual_style = result.get("report_style", style_choice)
+
+#         st.session_state.final_report = final_report
+#         st.session_state.hitl_active = False
+#         st.session_state.hitl_type = None
+#         st.session_state.is_running = False
+#         st.session_state.resume_mode = False
+#         st.session_state.resume_target = None
+#         st.session_state.selected_style = actual_style
+#         st.session_state.selected_format = format_choice
+#         st.balloons()
+#         st.rerun()
+#         return
+
+#     graph.update_state(config, {
+#         "human_feedback": val,
+#         "feed_back": text
+#     }, as_node="Wait")
+
+#     st.session_state.hitl_active = False
+#     st.session_state.is_running = True
+#     st.session_state.resume_mode = True # [Bugfix] 재개 모드 활성화
+#     st.session_state.resume_target = "main"
+#     st.rerun()
+
+def run_report_engine(log_container, graph_placeholder):
+    graph, sub_apps = get_graph()
+    report_app = sub_apps["report"]
+    
+    # 1) 콜백 연결: 실시간으로 AI 생각과 행동을 [📝 실행 로그]에 쏴주기 위한 백도어
+    st_callback = StreamlitAgentCallback(log_container, graph_placeholder)
     config: RunnableConfig = {
-        "configurable": {"thread_id": st.session_state.thread_id}
+        "configurable": {"thread_id": st.session_state.thread_id},
+        "callbacks": [st_callback]  # 여기가 핵심포인트!
     }
     
-    val = "APPROVE" if "Approve" in action else "REJECT"
+    # 2) 파라미터 세팅
+    snapshot = graph.get_state(config)
+    values = snapshot.values if hasattr(snapshot, "values") else {}
+    
+    # 1단계 버튼에서 저장했던 선택지 호출
+    format_choice = st.session_state.format_choice
+    style_choice = st.session_state.style_choice
 
-    if val == "APPROVE":
-        snapshot = graph.get_state(config)
-        values = snapshot.values if hasattr(snapshot, "values") else {}
-        report_app = sub_apps["report"]
+    sub_input = {
+        "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
+        "figure_list": values.get("figure_list") or st.session_state.figure_list,
+        "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
+        "report_format": format_choice or ["html"],
+        "report_style": style_choice,
+        "clean_data": values.get("clean_data"),
+        "final_report": "", 
+        "generated_formats": [],
+    }
 
-        sub_input = {
-            "analysis_results": values.get("analysis_results") or st.session_state.analysis_results,
-            "figure_list": values.get("figure_list") or st.session_state.figure_list,
-            "file_path": values.get("file_path", st.session_state.uploaded_file_path or ""),
-            "report_format": format_choice or ["Markdown"],
-            "report_style": style_choice,
-            "clean_data": values.get("clean_data"),
-        }
+    actual_style = style_choice
+    final_report = ""
 
-        result = report_app.invoke(sub_input, config=config)
-        final_report = result.get("final_report", "")
+    dot = generate_highlighted_graph("Final_report")
+    graph_placeholder.graphviz_chart(dot, width='stretch')
 
+    try:
+        # 3) 스트림(stream) 반복문
+        # 이전(.invoke)과 달리 중간중간 화면 클릭(다른 탭 구경)이 가능하도록 변경
+        for chunk in report_app.stream(sub_input, config=config):
+            for key, value in chunk.items():
+                if "final_report" in value and value["final_report"]:
+                    final_report = value["final_report"]
+                if "report_style" in value and value["report_style"]:
+                    actual_style = value["report_style"]
+                
+                # 내부 노드(HTML생성, PDF생성 등)를 지날 때마다 스텝을 로그에 남김
+                st.session_state.logs.append(f"보고서 작업 노드 통과: {key}")
+                with log_container.container():
+                    for log_msg in st.session_state.logs:
+                        st.text(log_msg)
+
+        # 4) 루프가 온전히 끝나면 화면 업데이트 후 스위치 끄기
         st.session_state.final_report = final_report
         st.session_state.hitl_active = False
-        st.session_state.hitl_type = None
-        st.session_state.is_running = False
-        st.session_state.resume_mode = False
-        st.session_state.resume_target = None
+        st.session_state.is_rendering_report = False  # 스위치 OFF
+        st.session_state.selected_style = actual_style
+        st.session_state.selected_format = format_choice
+        
         st.balloons()
         st.rerun()
-        return
 
-    graph.update_state(config, {
-        "human_feedback": val,
-        "feedback": text
-    }, as_node="Wait")
-
-    st.session_state.hitl_active = False
-    st.session_state.is_running = True
-    st.session_state.resume_mode = True # [Bugfix] 재개 모드 활성화
-    st.session_state.resume_target = "main"
-    st.rerun()
+    except Exception as e:
+        st.error(f"보고서 생성 스트리밍 중 오류 발생: {e}")
+        st.session_state.is_rendering_report = False
 
 # === 9. 시각화 및 인사이트 렌더링 (Pagination & Pairing) ===
 def render_visualization_tab():
@@ -1002,28 +1190,36 @@ def render_visualization_tab():
 
 def render_download_buttons():
     """
-    생성된 보고서 파일(PDF, HTML, PPTX, Markdown) 다운로드 버튼 렌더링
+    생성된 보고서 파일(PDF, HTML, PPTX, DOCX) 다운로드 버튼 렌더링
     """
     st.divider()
     st.subheader("📥 보고서 다운로드")
     
     # 1. 파일 경로 설정 (output 디렉토리 기준)
-    output_dir = "output"
+    output_dir = os.path.join("output", st.session_state.thread_id)
     files = {
-        "PDF 보고서": "report.pdf",
         "HTML 보고서": "report.html",
-        "PPTX 보고서": "report.pptx"
+        "PDF 보고서": "report.pdf",
+        "PPTX 보고서": "report.pptx",
+        "DOCX 보고서": "report.docx"
     }
     
     # 좌측 컬럼용 수직 레이아웃
-    
+    # 사용자가 선택했던 옵션 정보 표시 (세션에 있을 경우만)
+    if "selected_style" in st.session_state and "selected_format" in st.session_state:
+        style = st.session_state.selected_style
+        formats = ", ".join(st.session_state.selected_format)
+        
+        # 안내 문구를 예쁘게 박스(info) 형태로 출력
+        st.info(f"최종 보고서가 **[{style}]** 형식에 맞추어 작성되었으며, 요청하신 **[{formats}]** 포맷으로 다운로드 가능합니다.")
+        
     # (1) Markdown 다운로드 (항상 가능)
     if st.session_state.final_report:
         st.download_button(
-            label="📄 Markdown 다운로드",
+            label="🌐 HTML 다운로드",
             data=st.session_state.final_report,
-            file_name="report.md",
-            mime="text/markdown",
+            file_name="report.html",
+            mime="text/html",
             use_container_width=True
         )
         

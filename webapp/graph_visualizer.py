@@ -46,14 +46,18 @@ def get_base_graph():
     
     # 3. Tabular Flow (Vertical)
     dot.edge('Preprocessing', 'Analysis')
-    dot.edge('Analysis', 'Final_report')
-    dot.edge('Final_report', 'Wait')
+
+    # ▼▼▼ 분석 노드 스스로 도는 서브 피드백 화살표 ▼▼▼
+    dot.edge('Analysis', 'Analysis', label=' 내부 로직 수정\n(Sub-Feedback)', color='blue', fontcolor='blue', style='dotted', tailport='w', headport='w')
+    dot.edge('Analysis', 'Wait')
     
     # 4. Human Review Loop & End
-    dot.edge('Wait', 'End', label='APPROVE')
+    # dot.edge('Wait', 'End', label='APPROVE')
+    dot.edge('Wait', 'Final_report', label='보고서 추출 및 생성(Approve)')
 
-    dot.edge('Wait', 'Analysis', label='REJECT', color='red', style='dashed', constraint='true', tailport='e', headport='e')
-    
+    # dot.edge('Wait', 'Analysis', label='REJECT', color='red', style='dashed', constraint='true', tailport='e', headport='e')
+    dot.edge('Wait', 'Analysis', label=' 피드백 반영 및 재분석 (REJECT)', fontcolor='red', color='red', style='dashed', constraint='true', tailport='e', headport='e')
+    dot.edge('Final_report', 'End')    
     # 5. Document Flow End
     dot.edge('File_analysis', 'End')
     

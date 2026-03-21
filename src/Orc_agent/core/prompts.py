@@ -4,6 +4,17 @@ Role: Centralized management of LLM prompts.
 """
 
 # 보고서 생성 프롬프트
+HTML_WRAPPER_PROMPT = """
+{core_instructions}
+----------------------------------------------
+[출력 형식 필수 규칙]
+위에서 지시한 '{selected_style}' 작성 가이드라인을 완벽하게 따르되, 
+결과물은 마크다운(Markdown)이 아닌 **완벽한 HTML 코드**로 출력해 주세요.
+특히 텍스트의 줄바꿈(\n)이 무시되지 않도록 CSS에 `body {{ white-space: pre-wrap; }}`를 반드시 포함하세요.
+- 반드시 <html>, <head>, <body> 태그를 포함하세요.
+- 보기 좋게 하기 위해 <head> 안에 기본적인 CSS 스타일(<style>)을 넣어주세요.
+- 코드 블록 기호(```html) 등 부차적인 설명은 절대 쓰지 말고 오직 HTML 코드만 출력하세요.
+"""
 
 REPORT_PROMPT_GENERAL = """
 You are a Data Analyst and Auditor. Write a professional business report including a technical audit.
@@ -15,14 +26,13 @@ You are a Data Analyst and Auditor. Write a professional business report includi
 {all_results}
 
 ## Visual Assets
-{figure_markdown}
+{figure}
 
 ## Instructions
 1. Write in KOREAN.
-2. Use Markdown.
-3. **Audit Section**: Include a summary of technical quality, potential biases, and data integrity based on the analysis.
-4. **Key Insights**: Highlight top business-relevant findings.
-5. **Visuals**: Embed the provided figure links in the report.
+2. **Audit Section**: Include a summary of technical quality, potential biases, and data integrity based on the analysis.
+3. **Key Insights**: Highlight top business-relevant findings.
+4. **Visuals**: Embed the provided figure links in the report.
 
 ## Structure
 # 데이터 분석 최종 보고서
@@ -50,7 +60,7 @@ REPORT_PROMPT_DECISION = """
 {all_results}
 
 ## Visual Assets
-{figure_markdown}
+{figure}
 
 ## Instructions
 1. **수익성 중심**: 매출액뿐만 아니라 고객당 평균 주문가치(AOV)와 재구매율(Retention)을 분석할 것.
@@ -94,7 +104,7 @@ REPORT_PROMPT_MARKETING = """
 {all_results}
 
 ## Visual Assets
-{figure_markdown}
+{figure}
 
 ## Instructions
 1. **성과 판단 기준**: ROAS(광고 수익률)뿐만 아니라 CAC(고객 획득 비용)와 LTV(고객 생애 가치)의 관계를 분석할 것.
@@ -116,7 +126,7 @@ REPORT_PROMPT_MARKETING = """
    - **Scale-up 채널**: 효율이 좋고 확장 가능성이 높은 매체 선정.
    - **Efficiency-fix 채널**: 노출은 많으나 전환 효율이 낮아 소재 개선이 필요한 매체.
    - **Kill/Pause 채널**: 투입 대비 성과가 미비하여 예산 삭감이 필요한 매체.
-   - {figure_markdown} 기반의 상세 지표 해석.
+   - {figure} 기반의 상세 지표 해석.
 
 ## 4. 마케팅 시나리오 및 예산 재배분 (Budget Optimization)
    - **Scenario A (수익 극대화)**: 고효율 채널에 예산 30% 추가 집중 시 예상 매출.
@@ -148,6 +158,24 @@ REPORT_STYLE_CLASSIFICATION_PROMPT = """
 
    반드시 '일반 리포트', '의사 결정 리포트', '마케팅 예산 분배 리포트' 중 하나만 출력하세요. 다른 설명은 하지 마세요.
    """
+
+# PPT 제작
+# 1. 종합 인사이트 요약용
+OVERALL_PPT_PROMPT = """
+   당신은 전문 프레젠테이션 작성자입니다.
+   다음 종합 분석 결과를 바탕으로 보고서의 [Executive Summary] 슬라이드에 들어갈 핵심만 개조식(Bullet Point) 3~4줄로 짧고 명확하게 요약해 주세요.
+   불필요한 부연 설명은 빼고 글머리 기호(-)를 사용해서 작성하세요.
+   [종합 분석 결과]:
+   {text}
+"""
+# 2. 개별 차트 인사이트 요약용
+CHART_PPT_PROMPT = """
+   당신은 전문 프레젠테이션 작성자입니다.
+   다음 차트 분석 결과를 바탕으로, 해당 슬라이드(왼쪽 공간)에 들어갈 핵심만 개조식(Bullet Point) 3~4줄로 짧고 명확하게 요약해 주세요.
+   (이미지는 오른쪽에 배치될 예정이므로, 텍스트가 너무 길면 안 됩니다.)
+   [해당 차트 분석 결과]:
+   {text}
+"""
 
 
 ANALYSIS_PROMPT = """
