@@ -1,5 +1,6 @@
 
 import re
+import time
 import pandas as pd
 from ...State.state import analyzeState
 
@@ -105,6 +106,7 @@ def plan_analysis_code(state:analyzeState , config:RunnableConfig)-> analyzeStat
             callbacks=callbacks,
             metadata=lf_metadata,
         )
+        time.sleep(2) # 할당량 초과 방지
         response = llm.invoke(prompt, config=invoke_cfg)
 
     plan = response.content
@@ -188,6 +190,7 @@ def make_analysis_code(state:analyzeState,config:RunnableConfig)-> analyzeState:
                 callbacks=callbacks,
                 metadata=lf_metadata,
             )
+            time.sleep(2) # 할당량 초과 방지
             response = llm.invoke(prompt, config=invoke_cfg)
 
         # Content 추출 로직 강화: 리스트 블록인 경우 텍스트만 추출
@@ -347,6 +350,7 @@ def evaluation_code(state: analyzeState,config:RunnableConfig):
             callbacks=callbacks,
             metadata=lf_metadata,
         )
+        time.sleep(2) # 할당량 초과 방지
         response = llm.invoke(prompt, config=invoke_cfg)
     
     content = response.content if hasattr(response, "content") else str(response)
@@ -474,6 +478,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
                 callbacks=callbacks,
                 metadata=lf_metadata,
             )
+            time.sleep(3) # 이미지가 포함된 무거운 요청 전 버스트 방지를 위한 대기
             response = structured_llm.invoke([msg], config=invoke_cfg)
             
         filename_map = {os.path.basename(p): p for p in img_paths}
@@ -511,6 +516,7 @@ def derive_insight_node(state: analyzeState, config: RunnableConfig):
                 callbacks=callbacks,
                 metadata=lf_metadata,
             )
+            time.sleep(3) # 폴백 모델 호출 전에도 대기
             plain_response = llm.invoke(fallback_prompt, config=invoke_cfg)
             content = plain_response.content if hasattr(plain_response, 'content') else str(plain_response)
             

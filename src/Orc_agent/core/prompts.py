@@ -10,14 +10,14 @@ HTML_WRAPPER_PROMPT = """
 [출력 형식 필수 규칙]
 위에서 지시한 '{selected_style}' 작성 가이드라인을 완벽하게 따르되, 
 결과물은 마크다운(Markdown)이 아닌 **완벽한 HTML 코드**로 출력해 주세요.
-특히 텍스트의 줄바꿈(\n)이 무시되지 않도록 CSS에 `body {{ white-space: pre-wrap; }}`를 반드시 포함하세요.
+- 텍스트의 단락과 줄바꿈은 반드시 `<p>` 태그와 `<br>` 태그 등 명시적인 HTML 태그를 사용하세요. (CSS의 `white-space: pre-wrap;`은 디자인을 망치므로 절대 사용하지 마세요.)
 - 반드시 <html>, <head>, <body> 태그를 포함하세요.
-- 보기 좋게 하기 위해 <head> 안에 기본적인 CSS 스타일(<style>)을 넣어주세요.
+- 보기 좋게 하기 위해 <head> 안에 기본적인 CSS 스타일(<style>)을 넣어주세요. 단, 줄 간격이 너무 넓어지지 않도록 주의하세요.
 - 코드 블록 기호(```html) 등 부차적인 설명은 절대 쓰지 말고 오직 HTML 코드만 출력하세요.
 """
 
 REPORT_PROMPT_GENERAL = """
-You are a Data Analyst and Auditor. Write a professional business report including a technical audit.
+당신은 **데이터 분석가이자 감사관(Auditor)**입니다. 기술적 데이터 감사 내용을 포함한 전문적인 비즈니스 결과 보고서를 작성하세요.
 
 ## Data Info
 {data_summary}
@@ -29,10 +29,11 @@ You are a Data Analyst and Auditor. Write a professional business report includi
 {figure}
 
 ## Instructions
-1. Write in KOREAN.
-2. **Audit Section**: Include a summary of technical quality, potential biases, and data integrity based on the analysis.
-3. **Key Insights**: Highlight top business-relevant findings.
-4. **Visuals**: Embed the provided figure links in the report.
+- 언어: 모든 내용은 한국어로 작성하세요.
+- 데이터 감사(Audit) 섹션: 분석 결과를 바탕으로 데이터의 기술적 품질, 잠재적 편향성, 데이터 무결성(Integrity)에 대한 요약을 반드시 포함하세요.
+- 핵심 인사이트: 비즈니스 의사결정에 직결되는 가장 중요한 발견 사항을 강조하세요.
+- 마케팅 용어 처리: 보고서에 마케팅 전문 용어를 사용할 경우, 독자의 이해를 돕기 위해 해당 용어 바로 옆에 괄호나 주석으로 쉬운 설명을 덧붙이세요.
+- 시각 자료 및 설명: {figure}에 포함된 각 이미지(링크) 뒤에는 해당 시각 자료가 무엇을 의미하는지에 대한 개별적인 설명을 반드시 하나씩 작성하세요.
 
 ## Structure
 # 데이터 분석 최종 보고서
@@ -63,9 +64,12 @@ REPORT_PROMPT_DECISION = """
 {figure}
 
 ## Instructions
-1. **수익성 중심**: 매출액뿐만 아니라 고객당 평균 주문가치(AOV)와 재구매율(Retention)을 분석할 것.
-2. **코호트 분석**: 특정 시점 가입/구매 고객의 유지율을 통해 마케팅의 장기적 가치를 평가할 것.
-3. **상품 포트폴리오**: '많이 팔리지만 마진이 적은 상품' vs '적게 팔리지만 마진이 높은 상품'을 구분하여 전략 제안.
+- 언어: 모든 내용은 한국어로 작성하세요.
+- **수익성 중심**: 매출액뿐만 아니라 고객당 평균 주문가치(AOV)와 재구매율(Retention)을 분석할 것.
+- **코호트 분석**: 특정 시점 가입/구매 고객의 유지율을 통해 마케팅의 장기적 가치를 평가할 것.
+- **상품 포트폴리오**: '많이 팔리지만 마진이 적은 상품' vs '적게 팔리지만 마진이 높은 상품'을 구분하여 전략 제안.
+- 마케팅 용어 처리: 보고서에 마케팅 전문 용어를 사용할 경우, 독자의 이해를 돕기 위해 해당 용어 바로 옆에 괄호나 주석으로 쉬운 설명을 덧붙이세요.
+- 시각 자료 및 설명: {figure}에 포함된 각 이미지(링크) 뒤에는 해당 시각 자료가 무엇을 의미하는지에 대한 개별적인 설명을 반드시 하나씩 작성하세요.
 
 ## Structure
 # [세일즈 전략] 온라인 판매 데이터 기반 수익성 최적화 보고서
@@ -107,9 +111,12 @@ REPORT_PROMPT_MARKETING = """
 {figure}
 
 ## Instructions
-1. **성과 판단 기준**: ROAS(광고 수익률)뿐만 아니라 CAC(고객 획득 비용)와 LTV(고객 생애 가치)의 관계를 분석할 것.
-2. **채널 믹스 제언**: 성과가 낮은 채널의 예산을 성과가 높은 채널로 어떻게 재배분할지 구체적 액수를 제안할 것.
-3. **Audit**: 광고 데이터의 누수(Attribution 중복 등) 및 트래킹 정확도를 점검할 것.
+- 언어: 모든 내용은 한국어로 작성하세요.
+- **성과 판단 기준**: ROAS(광고 수익률)뿐만 아니라 CAC(고객 획득 비용)와 LTV(고객 생애 가치)의 관계를 분석할 것.
+- **채널 믹스 제언**: 성과가 낮은 채널의 예산을 성과가 높은 채널로 어떻게 재배분할지 구체적 액수를 제안할 것.
+- **Audit**: 광고 데이터의 누수(Attribution 중복 등) 및 트래킹 정확도를 점검할 것.
+- 마케팅 용어 처리: 보고서에 마케팅 전문 용어를 사용할 경우, 독자의 이해를 돕기 위해 해당 용어 바로 옆에 괄호나 주석으로 쉬운 설명을 덧붙이세요.
+- 시각 자료 및 설명: {figure}에 포함된 각 이미지(링크) 뒤에는 해당 시각 자료가 무엇을 의미하는지에 대한 개별적인 설명을 반드시 하나씩 작성하세요.
 
 ## Structure
 # [마케팅 전략] 데이터 기반 예산 최적화 및 성과 분석 보고서

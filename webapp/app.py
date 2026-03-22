@@ -582,8 +582,8 @@ def main_dashboard():
         # 3. 메인 에이전트 피드백 (조건부 표시)
         if st.session_state.hitl_active and st.session_state.hitl_type == "main":
             with st.container(border=True):
-                st.warning("🛑 분석 결과 검토 요청")
-                st.info("생성된 시각화와 인사이트를 검토한 뒤, 보고서 생성을 결정해주세요.")
+                st.warning("🛑 보고서 작성 요청")
+                st.info("보고서 파일 형태와 보고서 유형을 선택한 후 요청을 전송해주세요.")
                 
                 with st.form("main_hitl_form"):
                     format_choice = st.multiselect("보고서 파일 형태", ["HTML", "PDF", "PPTX", "DOCX"], default=["HTML"])
@@ -591,11 +591,12 @@ def main_dashboard():
                     # action = st.radio("검토 결과", ["승인 (Approve)", "거절 (Reject)"])                
                     # feedback_text = st.text_area("피드백 내용", placeholder="거절 시 수정 요청 사항을 입력하세요.")
                     
-                    if st.form_submit_button("보고서 생성 및 다운로드 (Approve)", type="primary"):
+                    if st.form_submit_button("요청 전송", type="primary"):
                         # handle_main_feedback(action, feedback_text, format_choice, style_choice)
                         st.session_state.is_rendering_report = True
                         st.session_state.format_choice = format_choice
                         st.session_state.style_choice = style_choice
+                        st.session_state.hitl_active = False # 폼 화면 숨기기
                         # 메인 루프로 빠져나가기 위해 새로고침 명령을 던짐
                         st.rerun()
 
@@ -1026,11 +1027,8 @@ def run_report_engine(log_container, graph_placeholder):
                 if "report_style" in value and value["report_style"]:
                     actual_style = value["report_style"]
                 
-                # 내부 노드(HTML생성, PDF생성 등)를 지날 때마다 스텝을 로그에 남김
-                st.session_state.logs.append(f"보고서 작업 노드 통과: {key}")
-                with log_container.container():
-                    for log_msg in st.session_state.logs:
-                        st.text(log_msg)
+                # 내부 노드 통과 상태를 다른 에이전트처럼 한 줄만 표시
+                log_container.info(f"⏳ 진행 중인 보고서 작업: {key}")
 
         # 4) 루프가 온전히 끝나면 화면 업데이트 후 스위치 끄기
         st.session_state.final_report = final_report

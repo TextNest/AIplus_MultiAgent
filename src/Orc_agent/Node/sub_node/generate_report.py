@@ -1,5 +1,6 @@
 import os
 import io
+import time
 import pandas as pd
 import base64
 
@@ -166,15 +167,18 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
         
         # Visualization Context
         figure = ""
+        base64_mapping = {}  # 플레이스홀더 맵핑용
         if figure_list:
             figure = "### Key Visualizations\n"
-            for fig in figure_list:
+            for i, fig in enumerate(figure_list):
                 if os.path.exists(fig):
                     # 이미지를 열어서 base64로 인코딩
                     with open(fig, "rb") as image_file:
                         encoded_string = base64.b64encode(image_file.read()).decode()
+                    placeholder = f"[FIGURE_{i}_PLACEHOLDER]"
+                    base64_mapping[placeholder] = f"data:image/png;base64,{encoded_string}"
                     # 로컬 src 경로 대신 매직 스트링(data:image/png...) 사용
-                    figure += f"<img src='data:image/png;base64,{encoded_string}' alt='{os.path.basename(fig)}' style='max-width: 100%;'>\n"
+                    figure += f"<img src='{placeholder}' alt='{os.path.basename(fig)}' style='max-width: 100%;'>\n"
         
         # Process Analysis Results
         processed_results = []
@@ -224,6 +228,7 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
                 callbacks=callbacks,
                 metadata=lf_metadata,
             )
+            time.sleep(2) # 할당량 한도(Rate Limit) 방어
             response = llm.invoke(prompt, config=invoke_cfg)
         
         # Handle DummyLLM response
@@ -233,8 +238,34 @@ def generate_content(state: ReportState, config: RunnableConfig) -> ReportState:
             content = str(response)
 
         if isinstance(content, list):
-            content = "".join([str(part) for part in content])
+            # LLM 멀티모달 응답의 경우 dict의 'text' 추출
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and "text" in part:
+                    parts.append(part["text"])
+                else:
+                    parts.append(str(part))
+            content = "".join(parts)
             
+        # 1. 마크다운 기호 제거 및 깔끔한 정리 (HTML 태그만 남기기)
+        import re
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content.strip(), flags=re.IGNORECASE)
+        content = re.sub(r"\n```$", "", content)
+        content = content.replace("```html", "").replace("```", "")
+        
+        # 1-1. LLM의 출력물이 텍스트 문자열(literal '\\n')을 포함하는 경우 실제 개행으로 변경
+        content = content.replace("\\n", "\n")
+        
+        # 2. 플레이스홀더를 실제 Base64 데이터로 교체
+        for placeholder, base64_data in base64_mapping.items():
+            # 정상적인 태그 교체
+            content = content.replace(placeholder, base64_data)
+            # LLM이 특수문자를 URL 인코딩(%5B, %5D)했을 경우 교체
+            url_encoded = placeholder.replace("[", "%5B").replace("]", "%5D")
+            content = content.replace(url_encoded, base64_data)
+            # 대소문자 오류 방어
+            content = content.replace(placeholder.lower(), base64_data)
+
         return {
             "final_report": content,
             "steps_log": ["[Report] Generated content via LLM"]
@@ -262,14 +293,35 @@ def create_pdf(state: ReportState, config: RunnableConfig) -> ReportState:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         
-        # 1. Font Source (Windows)
-        font_name = "MalgunGothic"
-        system_font_path = r"C:/Windows/Fonts/malgun.ttf"
+        # 1. Font Source (Cross-platform)
+        import platform
+        font_name = "Helvetica"
+        system_font_path = ""
         
-        # 2. Register Font via ReportLab directly
-        # This bypasses xhtml2pdf's internal font loading which can cause temp file issues
+        system = platform.system()
+        if system == "Windows":
+            font_name = "MalgunGothic"
+            system_font_path = r"C:/Windows/Fonts/malgun.ttf"
+        
+        # 리눅스, Mac 또는 지정 폰트가 없을 시: matplotlib 활용 탐색
+        if not os.path.exists(system_font_path):
+            try:
+                from matplotlib import font_manager
+                font_list = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
+                preferred = ['nanumgothic', 'nanumbarun', 'malgun', 'notosanscjk', 'd2coding', 'applegothic']
+                for pref in preferred:
+                    for f in font_list:
+                        if pref in f.lower():
+                            system_font_path = f
+                            font_name = "KoreanFont"
+                            break
+                    if system_font_path and os.path.exists(system_font_path):
+                        break
+            except Exception:
+                pass
+        
         font_registered = False
-        if os.path.exists(system_font_path):
+        if system_font_path and os.path.exists(system_font_path):
             try:
                 pdfmetrics.registerFont(TTFont(font_name, system_font_path))
                 font_registered = True
@@ -279,12 +331,25 @@ def create_pdf(state: ReportState, config: RunnableConfig) -> ReportState:
         if not font_registered:
              # Fallback to a standard font if registration fails
              font_name = "Helvetica" # standard PDF font
+             system_font_path = ""
              print("Using fallback font: Helvetica")
+
+        font_face_css = ""
+        if system_font_path:
+            # 윈도우 역슬래시 이슈 방지를 위해 주소 포맷 변경
+            clean_path = system_font_path.replace('\\', '/')
+            font_face_css = f'''
+                @font-face {{
+                    font-family: '{font_name}';
+                    src: url('{clean_path}');
+                }}'''
 
         styled_html = f"""
         <html>
         <head>
+            <meta charset="utf-8">
             <style>
+                {font_face_css}
                 body {{
                     font-family: '{font_name}', sans-serif;
                 }}
@@ -331,7 +396,18 @@ def create_docx(state: ReportState, config: RunnableConfig) -> ReportState:
         doc = docx.Document()
         doc.add_heading('Data Analysis Report', 0)
         
-        # 이미지(figure_list)를 순회하며 워드파일 안에 박아 넣기
+        # 1. HTML에서 텍스트 추출 후 문단 추가
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content_text, 'html.parser')
+            text_blocks = soup.get_text(separator='\n\n', strip=True)
+            for para in text_blocks.split('\n\n'):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
+        except Exception as e:
+            doc.add_paragraph("텍스트 파싱 오류 발생: " + str(e))
+        
+        # 2. 이미지(figure_list)를 순회하며 워드파일 안에 박아 넣기
         figure_list = state.get("figure_list", [])
         doc.add_heading('Visualizations', level=1)
         for fig_path in figure_list:
@@ -401,7 +477,8 @@ def create_pptx(state: ReportState, config: RunnableConfig) -> ReportState:
                     chart_insights[key] = insight_text
 
         if overall_text_raw:
-            # LLM 호출
+            # LLM 호출 전에 약간 대기
+            time.sleep(2)
             prompt = OVERALL_PPT_PROMPT.format(text=overall_text_raw)
             response = llm.invoke(prompt)
             content_val = response.content
@@ -425,9 +502,10 @@ def create_pptx(state: ReportState, config: RunnableConfig) -> ReportState:
                 # 2. 딕셔너리에서 해당 차트의 원본 인사이트 가져오기
                 raw_chart_insight = chart_insights.get(img_filename, "")
                 
-                # 3. LLM으로 짧게 요약
-                chart_bullet_points = "요약 정보 없음"
+                # 3. 차트 요약 생성
+                chart_bullet_points = "요약 정보 없음" # 기본값
                 if raw_chart_insight:
+                    time.sleep(3) # 버스트 호출 방지용 안전 지연
                     prompt = CHART_PPT_PROMPT.format(text=raw_chart_insight)
                     response = llm.invoke(prompt)
                     content_val = response.content
