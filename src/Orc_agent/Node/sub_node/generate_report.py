@@ -341,7 +341,7 @@ def create_pdf(state: ReportState, config: RunnableConfig) -> ReportState:
             font_face_css = f'''
                 @font-face {{
                     font-family: '{font_name}';
-                    src: url('{clean_path}');
+                    src: url('file:///{clean_path}');
                 }}'''
 
         styled_html = f"""
@@ -463,18 +463,23 @@ def create_pptx(state: ReportState, config: RunnableConfig) -> ReportState:
         if analysis_results:
             overall_text_raw = ""
             chart_insights = {}  # { "figure_0_0.png": "인사이트 전문", ... }
-            for key, value_dict in analysis_results.items():
-                if isinstance(value_dict, dict):
-                    insight_text = value_dict.get("insight", "")
-                else:
-                    insight_text = str(value_dict)
-                
-                # overall로 시작하는 키는 전체 요약용으로
-                if key.startswith("overall"):
-                    overall_text_raw += insight_text + "\n"
-                # 그 외(.png 등)는 개별 차트용으로 분류
-                else:
-                    chart_insights[key] = insight_text
+            
+            if isinstance(analysis_results, dict):
+                for key, value_dict in analysis_results.items():
+                    if isinstance(value_dict, dict):
+                        insight_text = value_dict.get("insight", "")
+                    else:
+                        insight_text = str(value_dict)
+                    
+                    # overall로 시작하는 키는 전체 요약용으로
+                    if key.startswith("overall"):
+                        overall_text_raw += insight_text + "\n"
+                    # 그 외(.png 등)는 개별 차트용으로 분류
+                    else:
+                        chart_insights[key] = insight_text
+            elif isinstance(analysis_results, list):
+                # 리스트 형태로 떨어졌을 때는 그냥 전체 요약으로 뭉뚱그림
+                overall_text_raw = "\n".join([str(item) for item in analysis_results])
 
         if overall_text_raw:
             # LLM 호출 전에 약간 대기

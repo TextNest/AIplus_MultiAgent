@@ -600,13 +600,17 @@ def main_dashboard():
                         # 메인 루프로 빠져나가기 위해 새로고침 명령을 던짐
                         st.rerun()
 
-        # 4. 로그 출력 (간단히)
-        with st.expander("📝 실행 로그", expanded=True):
+        # 4. 로그 출력 (간단히) - 내용이 있거나 실행 중일 때만 표시하여 빈 껍데기(유령 박스) 방지
+        if st.session_state.logs or st.session_state.get("is_running", False) or st.session_state.get("is_rendering_report", False):
+            with st.expander("📝 실행 로그", expanded=True):
+                log_container = st.empty()
+                # 세션에 저장된 로그가 있다면 다시 표시
+                with log_container.container():
+                    for log in st.session_state.logs:
+                        st.text(log)
+        else:
+            # UI에 표시하지 않고 보이지 않는 더미 깡통(빈 컨테이너) 할당
             log_container = st.empty()
-            # 세션에 저장된 로그가 있다면 다시 표시
-            with log_container.container():
-                for log in st.session_state.logs:
-                    st.text(log)
         
         # 5. [NEW] 보고서 다운로드 (좌측 컬럼)
         if st.session_state.final_report:
